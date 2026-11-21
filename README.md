@@ -2,6 +2,8 @@
 
 美股和日股的收市後股票篩選器。Python 計算 ADX、Pullback、Squeeze On、Turtle Soup Plus One、Weak ADX 和 Young Trend。繁體中文介面可以切換市場和交易日，查看代號、名稱、成交量及 SCTR。日股 SCTR 按規模分組在本機計算。
 
+[開啟線上版收市掃描](https://nick-l-wh.github.io/jp-us-screener/)。在「資料工具」匯入快照後，即可選擇交易日。快照儲存在使用這個網址的瀏覽器內。
+
 ## 本機使用
 
 使用 Python 3.11 以上版本及 Node.js 22。在專案根目錄執行以下命令。
