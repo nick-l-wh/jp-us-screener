@@ -1,0 +1,467 @@
+{
+  "assumptions": [
+    {
+      "body": "這是私人研究草稿，不是 StockCharts 的產品，也不會登入、擷取或改動任何帳戶。沒有選定行情供應商，引擎只讀本地 CSV。",
+      "id": "scope",
+      "title": "草稿範圍"
+    },
+    {
+      "body": "ADX、Pullback、Young Trend 的原文是沒有括號的 OR 然後 AND。本引擎的暫定語意是（大型或中型）並且其餘條件同時成立。這不等於已核對的掃描器語法。Weak ADX 原文有括號，依括號計算。",
+      "id": "grouping",
+      "title": "條件分組待核對"
+    },
+    {
+      "body": "yesterday's max(25, Plus DI(14)) 是不含今日的前 25 根 +DI(14) 最高值，不是與數字 25 比較。yesterday's min 同樣是前 25 根最低值。沒有 yesterday's 的 min(63) 或 min(20) 則包含今日。",
+      "id": "rolling-di",
+      "title": "前 25 根 DI"
+    },
+    {
+      "body": "Pullback 的 Daily ULCER(10) 與 Young Trend 的 ROC(3) 只排序命中，不決定是否命中。預設較大值在前。這個方向未經來源核對。",
+      "id": "sorts",
+      "title": "排序不是過濾"
+    },
+    {
+      "body": "只保留美國與日本的股票。ETF 在計算族群排名和六條掃描之前剔除。security_type 缺漏、unknown 或其他類型會剔除並寫入診斷，不會假設成股票。Young Trend 原文沒有類型條款，股票限定是本引擎的宇宙政策。",
+      "id": "universe",
+      "title": "股票宇宙"
+    },
+    {
+      "body": "預設政策是 unresolved。listing_segment 明確為 adr 或 otc 時，不會靜默納入，也不會靜默排除後當作已有決定，只會列入資格未決議。空白欄位不會靠代號或交易所名稱去猜測。unknown 同樣不放行進掃描。",
+      "id": "adr-otc",
+      "title": "ADR 與 OTC"
+    },
+    {
+      "body": "OHLC 必須整列標成 split_and_dividend，與檢視當時「adjusted for dividends」的語境一致。引擎不混合調整制度，也不在這裡重算股息。成交量是未調整股數，不是成交金額。",
+      "id": "adjustment",
+      "title": "除權息與成交量"
+    },
+    {
+      "body": "回看是交易柱數，不是日曆日。引擎不會在假期向前填價，也不會補出沒有提供的柱。星期六與日的柱會判為資料錯誤。沒有內建交易所假期表，所以假期缺口要由匯入檔本身跳過。",
+      "id": "calendar",
+      "title": "交易柱"
+    },
+    {
+      "body": "市值只用檔案裡帶貨幣的數字，不從 OHLCV 反推。Squeeze 大於 1,000 百萬美元（1e9 USD），Weak 大於 10,000 百萬美元（1e10 USD）。這兩個過濾一直生效。缺市值或貨幣不是 USD 時，該列是未滿足依賴，不會變成命中，也不會換算成日圓。",
+      "id": "cap",
+      "title": "市值"
+    },
+    {
+      "body": "Squeeze 與 Turtle 原文限美國。日本市場這兩條顯示「需要日股適配參數」，不會套用美國規則。Squeeze 沒有 close > 5；那一條只在 Turtle，也不會改成 5 日圓。",
+      "id": "jp-us-only-scans",
+      "title": "只限美國的兩條"
+    },
+    {
+      "body": "排名按 ChartSchool 公開的 SCTR 權重，在每個市場、每個大型或中型族群內部分別計算，標成「技術排名（依SCTR公開方法，非官方）」。不是官方 SCTR。不會用一條全球排名同時填入大型與中型。人數不足時該族群排名不可用。",
+      "id": "rank",
+      "title": "技術排名"
+    },
+    {
+      "body": "PPO 用 (12, 26, 9)。權重表是這個參數；SCTR 正文曾把訊號線寫成 12 日 EMA。兩者不一致，本引擎跟隨權重表和 PPO 頁的 9 日訊號線，不聲稱與官方分數一致。",
+      "id": "ppo",
+      "title": "PPO 參數"
+    },
+    {
+      "body": "cohort_thresholds.enabled 預設 false，只表示宇宙檔沒有 cohort 時不要用市值自動分大型或中型。它不會關掉 Squeeze 或 Weak 的市值過濾。請在宇宙檔填 cohort。設定檔裡的美國數字只是被停用的公開參考。",
+      "id": "cohort-config",
+      "title": "族群門檻"
+    },
+    {
+      "body": "等式只用相對 1e-12、絕對 1e-9 吸收浮點捨入，不是價格容許帶。落在這個範圍內的大於或小於會視作相等，所以不會因為最後一個位元而通過。",
+      "id": "equality",
+      "title": "等式精度"
+    },
+    {
+      "body": "檔案結構壞掉、沒有可判定證券，或計算拋出錯誤時，不覆寫上一個成功快照。成功跑完但沒有命中會寫入，並標明已完成計算。",
+      "id": "failure",
+      "title": "失敗不覆寫"
+    },
+    {
+      "body": "真實模式沒有匯入時保持空白。示範模式只用 SYN- 合成代號，畫面和匯出都帶同一句示範聲明。示範價格不是真實發行人的行情。",
+      "id": "demo",
+      "title": "真實與示範"
+    }
+  ],
+  "engine_version": "0.1.0",
+  "ohlcv_columns": [
+    "market",
+    "symbol",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "adjustment"
+  ],
+  "rank_method": {
+    "label": "技術排名（依SCTR公開方法，非官方）",
+    "official_parity": false,
+    "percentile": "最低分為 0.0，最高分為 99.9；同分取平均序位，四捨五入到 0.1（half up）。",
+    "ppo": {
+      "assumption": "ChartSchool SCTR 權重表寫 PPO(12,26,9)。同頁正文寫直方圖是 PPO 減其 12 日 EMA。PPO 條目與掃描語法則用 9 日訊號線。本引擎採用 (12,26,9)，不聲稱與官方分數一致。",
+      "parameters": [
+        12,
+        26,
+        9
+      ],
+      "slope": "(hist[t] - hist[t-3]) / 3；限制在 [-1, 1] 後映射到 0..5 分。"
+    },
+    "range": [
+      0.0,
+      99.9
+    ],
+    "scope": "每個市場、每個 cohort 各自排名。大型欄位與中型欄位不是同一條全球排名。",
+    "source": "https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-indicators/stockcharts-technical-rank-sctr",
+    "weights": {
+      "pct_distance_ema200": 0.3,
+      "pct_distance_ema50": 0.15,
+      "ppo_histogram_slope3": 0.05,
+      "roc125": 0.3,
+      "roc20": 0.15,
+      "rsi14": 0.05
+    }
+  },
+  "scans": [
+    {
+      "clauses": [
+        {
+          "id": "adx-gate",
+          "label": "（暫定）大型或中型技術排名 > 0",
+          "op": "or"
+        },
+        {
+          "id": "adx-large",
+          "label": "大型族群技術排名 > 0",
+          "op": "rank"
+        },
+        {
+          "id": "adx-mid",
+          "label": "中型族群技術排名 > 0",
+          "op": "rank"
+        },
+        {
+          "id": "adx-roc90",
+          "label": "90 日 ROC > 20",
+          "op": "cmp"
+        },
+        {
+          "id": "adx-di",
+          "label": "今日 +DI(14) > 不含今日的前 25 根 +DI(14) 最高值",
+          "op": "cmp"
+        },
+        {
+          "id": "adx-type",
+          "label": "類型為股票",
+          "op": "flag"
+        },
+        {
+          "id": "adx-vol",
+          "label": "成交量（股數）> 100000",
+          "op": "cmp"
+        },
+        {
+          "id": "adx-own",
+          "label": "所屬族群技術排名 > 70",
+          "op": "rank"
+        }
+      ],
+      "grouping": "provisional_cohort_and_rest",
+      "grouping_warning": "條件分組待核對",
+      "id": "adx",
+      "jp_policy": "run",
+      "name_en": "ADX",
+      "name_zh": "ADX",
+      "raw_source": "[SCTR.large > 0]\nor [SCTR.mid > 0]\nand [roc(90) > 20]\nand [Plus DI(14) > yesterday's max(25, Plus DI(14))]\nand [type is stock]\nand [Volume > 100000]\nand [SCTR > 70]",
+      "sort": null,
+      "source_id": "4468405"
+    },
+    {
+      "clauses": [
+        {
+          "id": "pb-gate",
+          "label": "（暫定）大型或中型技術排名 > 70",
+          "op": "or"
+        },
+        {
+          "id": "pb-large",
+          "label": "大型族群技術排名 > 70",
+          "op": "rank"
+        },
+        {
+          "id": "pb-mid",
+          "label": "中型族群技術排名 > 70",
+          "op": "rank"
+        },
+        {
+          "id": "pb-roc20",
+          "label": "20 日 ROC > 20",
+          "op": "cmp"
+        },
+        {
+          "id": "pb-di",
+          "label": "+DI(14) > 30",
+          "op": "cmp"
+        },
+        {
+          "id": "pb-type",
+          "label": "類型為股票",
+          "op": "flag"
+        }
+      ],
+      "grouping": "provisional_cohort_and_rest",
+      "grouping_warning": "條件分組待核對",
+      "id": "pullback",
+      "jp_policy": "run",
+      "name_en": "Pullback",
+      "name_zh": "回調",
+      "raw_source": "[SCTR.large > 70]\nor [SCTR.mid > 70]\nand [roc(20) > 20]\nand [Plus DI(14) > 30]\nand [type is stock]\nrank by [Daily ULCER(10)]",
+      "sort": {
+        "direction": "desc",
+        "direction_verified": false,
+        "field": "ulcer10",
+        "note": "Daily ULCER(10) 是排序不是過濾。預設較大值在前；方向未經來源核對。"
+      },
+      "source_id": "4477104"
+    },
+    {
+      "clauses": [
+        {
+          "id": "sq-type",
+          "label": "類型為股票",
+          "op": "flag"
+        },
+        {
+          "id": "sq-country",
+          "label": "國家為美國",
+          "op": "flag"
+        },
+        {
+          "id": "sq-vol",
+          "label": "20 日平均成交量（股數）> 300000",
+          "op": "cmp"
+        },
+        {
+          "id": "sq-sma",
+          "label": "收市 > SMA(200)",
+          "op": "cmp"
+        },
+        {
+          "id": "sq-sma-lag",
+          "label": "SMA(200) > 20 根之前的 SMA(200)",
+          "op": "cmp"
+        },
+        {
+          "id": "sq-kcu",
+          "label": "Keltner 上軌 > 布林上軌",
+          "op": "cmp"
+        },
+        {
+          "id": "sq-kcl",
+          "label": "Keltner 下軌 < 布林下軌",
+          "op": "cmp"
+        },
+        {
+          "id": "sq-width",
+          "label": "布林寬度等於含今日的 63 根最小值",
+          "op": "cmp"
+        },
+        {
+          "id": "sq-pdi",
+          "label": "+DI(14) < 20",
+          "op": "cmp"
+        },
+        {
+          "id": "sq-mdi",
+          "label": "-DI(14) < 20",
+          "op": "cmp"
+        },
+        {
+          "id": "sq-cap",
+          "label": "市值 > 1,000（百萬美元）即 > 1e9 USD",
+          "op": "cap_usd"
+        }
+      ],
+      "grouping": "explicit_and",
+      "grouping_warning": null,
+      "id": "squeeze",
+      "jp_message": "需要日股適配參數",
+      "jp_policy": "needs_parameters",
+      "name_en": "Squeeze On",
+      "name_zh": "擠壓開啟",
+      "raw_source": "[type = stock]\nand [country is US]\nand [sma(20,volume) > 300000]\nand [close > sma(200,close)]\nand [sma(200,close) > 20 days ago sma(200,close)]\nand [Upper Kelt Chan(20,1.5,10) > Upper BB(20,2)]\nand [Lower Kelt Chan(20,1.5,10) < Lower BB(20,2)]\nand [BB Width(20,2) = min(63, BB Width(20,2))]\nand [Plus DI(14) < 20]\nand [Minus DI(14) < 20]\nand [market cap > 1,000]",
+      "sort": null,
+      "source_id": "4536938"
+    },
+    {
+      "clauses": [
+        {
+          "id": "tu-type",
+          "label": "類型為股票",
+          "op": "flag"
+        },
+        {
+          "id": "tu-country",
+          "label": "國家為美國",
+          "op": "flag"
+        },
+        {
+          "id": "tu-vol",
+          "label": "20 日平均成交量（股數）> 500000",
+          "op": "cmp"
+        },
+        {
+          "id": "tu-etf",
+          "label": "group 不是 ETF",
+          "op": "flag"
+        },
+        {
+          "id": "tu-px",
+          "label": "收市 > 5（美元；不換算成日圓）",
+          "op": "cmp"
+        },
+        {
+          "id": "tu-low",
+          "label": "今日低位等於含今日的 20 根最低值",
+          "op": "flag"
+        },
+        {
+          "id": "tu-prior",
+          "label": "3 至 10 根前任一低位等於昨日的 20 根最低值",
+          "op": "flag"
+        },
+        {
+          "id": "tu-close",
+          "label": "收市 <= 昨日 20 根最低值 × 1.005",
+          "op": "cmp"
+        }
+      ],
+      "grouping": "explicit_and",
+      "grouping_warning": null,
+      "id": "turtle",
+      "jp_message": "需要日股適配參數",
+      "jp_policy": "needs_parameters",
+      "name_en": "Turtle Soup Plus One - buy",
+      "name_zh": "海龜湯加一（買入）",
+      "raw_source": "[type = stock]\nand [country is us]\nand [SMA(20, volume) > 500000]\nand [group is not ETF]\nand [close > 5]\n\n//  20\nand [low = min(20, low)]\n\n//  20  3  OR\nand [\n    [3 days ago low = 1 day ago min(20, low)] or\n    [4 days ago low = 1 day ago min(20, low)] or\n    [5 days ago low = 1 day ago min(20, low)] or\n    [6 days ago low = 1 day ago min(20, low)] or\n    [7 days ago low = 1 day ago min(20, low)] or\n    [8 days ago low = 1 day ago min(20, low)] or\n    [9 days ago low = 1 day ago min(20, low)] or\n    [10 days ago low = 1 day ago min(20, low)]\n]\n\n//  20\nand [close <= 1 day ago min(20, low) * 1.005]",
+      "sort": null,
+      "source_id": "4554816"
+    },
+    {
+      "clauses": [
+        {
+          "id": "wk-type",
+          "label": "類型為股票",
+          "op": "flag"
+        },
+        {
+          "id": "wk-vol",
+          "label": "成交量（股數）> 100000",
+          "op": "cmp"
+        },
+        {
+          "id": "wk-gate",
+          "label": "（原文括號）大型或中型技術排名 > 0",
+          "op": "or"
+        },
+        {
+          "id": "wk-large",
+          "label": "大型族群技術排名 > 0",
+          "op": "rank"
+        },
+        {
+          "id": "wk-mid",
+          "label": "中型族群技術排名 > 0",
+          "op": "rank"
+        },
+        {
+          "id": "wk-own",
+          "label": "所屬族群技術排名 < 20",
+          "op": "rank"
+        },
+        {
+          "id": "wk-adx",
+          "label": "ADX(14) < 20",
+          "op": "cmp"
+        },
+        {
+          "id": "wk-di",
+          "label": "今日 +DI(14) < 不含今日的前 25 根 +DI(14) 最低值",
+          "op": "cmp"
+        },
+        {
+          "id": "wk-cap",
+          "label": "市值 > 10,000（百萬美元）即 > 1e10 USD",
+          "op": "cap_usd"
+        }
+      ],
+      "grouping": "explicit_brackets",
+      "grouping_warning": null,
+      "id": "weak",
+      "jp_policy": "run",
+      "name_en": "Weak ADX",
+      "name_zh": "弱 ADX",
+      "raw_source": "[type is stock]\nand [Volume > 100000]\nand\n[\n [SCTR.large > 0]\n or [SCTR.mid > 0]\n]\nand [SCTR < 20]\nand [ADX Line(14) < 20]\nand [Plus DI(14) < yesterday's min(25, Plus DI(14))]\nand [market cap > 10,000]",
+      "sort": null,
+      "source_id": "4534703"
+    },
+    {
+      "clauses": [
+        {
+          "id": "yt-gate",
+          "label": "（暫定）大型或中型技術排名 > 50",
+          "op": "or"
+        },
+        {
+          "id": "yt-large",
+          "label": "大型族群技術排名 > 50",
+          "op": "rank"
+        },
+        {
+          "id": "yt-mid",
+          "label": "中型族群技術排名 > 50",
+          "op": "rank"
+        },
+        {
+          "id": "yt-roc",
+          "label": "3 日 ROC > 9",
+          "op": "cmp"
+        },
+        {
+          "id": "yt-vol",
+          "label": "SMA(3,成交量) > SMA(50,成交量) × 1.5",
+          "op": "cmp"
+        }
+      ],
+      "grouping": "provisional_cohort_and_rest",
+      "grouping_warning": "條件分組待核對",
+      "id": "young",
+      "jp_policy": "run",
+      "name_en": "Young Trend",
+      "name_zh": "初生趨勢",
+      "raw_source": "[SCTR.large > 50]\nor [SCTR.mid > 50]\nand [roc(3) > 9]\nand [SMA(3,volume)>SMA(50,volume)*1.5]\nrank by ROC(3)",
+      "sort": {
+        "direction": "desc",
+        "direction_verified": false,
+        "field": "roc3",
+        "note": "ROC(3) 是排序不是過濾。預設較大值在前；方向未經來源核對。"
+      },
+      "source_id": "4525267"
+    }
+  ],
+  "schema_version": "1.0.0",
+  "semantics_version": "2026-11-21.provisional.1",
+  "universe_columns": [
+    "market",
+    "symbol",
+    "name",
+    "security_type",
+    "listing_segment",
+    "exchange",
+    "currency",
+    "cohort",
+    "market_cap",
+    "market_cap_currency",
+    "market_cap_as_of",
+    "group"
+  ]
+}

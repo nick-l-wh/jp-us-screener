@@ -1,0 +1,2 @@
+market,symbol,name,security_type,listing_segment,exchange,currency,cohort,market_cap,market_cap_currency,market_cap_as_of,group
+US,SYN-EXAMPLE,"合成,「範例」",stock,primary,XNAS,USD,large,2000000000,USD,2024-01-02,

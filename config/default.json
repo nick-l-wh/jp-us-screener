@@ -1,0 +1,27 @@
+{
+  "min_cohort_size": 5,
+  "adr_policy": "unresolved",
+  "otc_policy": "unresolved",
+  "adjustment_required": "split_and_dividend",
+  "volume_basis": "unadjusted_shares",
+  "cohort_thresholds": {
+    "US": {
+      "enabled": false,
+      "currency": "USD",
+      "large_min": 10000000000,
+      "mid_min": 2000000000,
+      "mid_max": 10000000000,
+      "small_min": 250000000,
+      "note": "未啟用。數字只是 ChartSchool 公開的美國 SCTR 宇宙說明，不是本引擎自動套用的官方門檻。"
+    },
+    "JP": {
+      "enabled": false,
+      "currency": null,
+      "large_min": null,
+      "mid_min": null,
+      "mid_max": null,
+      "small_min": null,
+      "note": "沒有日股官方分層。請在宇宙檔提供 cohort，或自行寫入貨幣與門檻。不會把美元門檻改成日圓。"
+    }
+  }
+}

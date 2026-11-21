@@ -1,0 +1,37 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+node_modules/
+web/dist/
+web/node_modules/
+
+# Raw histories, local snapshots, and secrets stay out of git.
+data/
+snapshots/
+*.key
+*.pem
+.env
+.env.*
+
+.DS_Store
+*.tmp
+web/public/demo/*.tmp
+
+# Local exports and market data
+*.html
+!web/index.html
+web/public/comparison/
+web/src/review/
+*.xlsx
+*.parquet
+*.zip
+*.csv
+!web/public/templates/*.csv
+web/public/history/
+exports/
