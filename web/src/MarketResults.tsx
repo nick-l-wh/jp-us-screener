@@ -1,20 +1,24 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { SCAN_ROUTES, ScanResults, type MarketCode } from "./ScanResults";
 import type { TradingDay } from "./history";
 import { hitLabel } from "./publication";
 
+const SCAN_IDS = SCAN_ROUTES.map(scan => scan.id);
 
-
-export function MarketResults({ market, scanId, history, choice, onChoose, tools, loading }: {
+export function MarketResults({ market, scanId, history, choice, onChoose, onImport, error, loading, snapshotId }: {
   market: MarketCode;
   scanId: string | null;
   history: Record<string, TradingDay>;
   choice?: string;
   onChoose: (key: string) => void;
-  tools: ReactNode;
+  onImport: (file: File | undefined) => void;
+  error: string | null;
   loading?: boolean;
+  snapshotId?: string;
 }) {
   const marketPath = "#/" + market.toLowerCase();
+  const [enabled, setEnabled] = useState<Record<string, boolean>>(() => Object.fromEntries(SCAN_IDS.map(id => [id, true])));
+  const [toolsOpen, setToolsOpen] = useState(false);
   const options = Object.values(history).filter(day => day.market === market).map(day => ({
     key: day.key,
     date: day.date,
@@ -32,6 +36,8 @@ export function MarketResults({ market, scanId, history, choice, onChoose, tools
   const day = history[selected?.key] ?? null;
   const date = selected?.date ?? null;
   const meta = SCAN_ROUTES.find(scan => scan.id === scanId);
+  const used = SCAN_IDS.filter(id => enabled[id]).length;
+  const resultsHref = `${marketPath}/${scanId ?? "adx"}`;
 
   function count(id: string) {
     if (!date) return null;
@@ -41,45 +47,118 @@ export function MarketResults({ market, scanId, history, choice, onChoose, tools
   }
 
   return (
-    <main className="market-page">
-      <header>
-        {meta && <a className="back-link" href={marketPath}>所有掃描</a>}
-        <h1>{meta?.en ?? "收市掃描"}</h1>
-        <nav className="market-switch" aria-label="股票市場">
+    <div className="screen-shell">
+      <header className="screen-bar">
+        <h1>JP and US screen</h1>
+        <nav className="screen-toggle" aria-label="股票市場">
           {(["US", "JP"] as const).map(code =>
             <a key={code} href={`#/${code.toLowerCase()}${scanId ? "/" + scanId : ""}`}
                aria-current={code === market ? "page" : undefined} data-testid={`market-${code}`}>
-              {code === "US" ? "美股" : "日股"}
+              {code === "US" ? "US 美國" : "JP 日本"}
             </a>
           )}
         </nav>
-        <div className="market-date">
-          <select aria-label="交易日期" disabled={!options.length} value={selected?.key ?? ""} onChange={e => onChoose(e.target.value)}>
-            {!options.length && <option value="">尚無交易日資料</option>}
-            {dateOptions}
-          </select>
-          {selected?.demo && <span>示範／合成資料</span>}
-          {date && <p className="market-asof" data-testid="data-date">{day?.source === "published" ? "已公布數據日期" : "數據日期"} {date}</p>}
-        </div>
       </header>
-      {loading && !day && <p data-testid="loading-published">正在載入已公布的 2026-11-20 結果</p>}
-      {day?.notice && <p className="publication-note" data-testid="publication-note">{day.notice}</p>}
-      {!meta ? (
-        <div className="market-table"><table aria-label="掃描命中數">
-          <thead><tr><th>掃描</th><th>命中數</th></tr></thead>
-          <tbody>{SCAN_ROUTES.map(scan => <tr key={scan.id}>
-            <th scope="row"><a href={`${marketPath}/${scan.id}`}>{scan.en}</a></th>
-            <td data-testid={`count-${scan.id}`}>{count(scan.id) ?? "—"}</td>
-          </tr>)}</tbody>
-        </table></div>
-      ) : (
-        <ScanResults key={market + meta.id + selected?.key}
-          scanId={meta.id} market={market} day={day} date={date} />
-      )}
-      <details className="market-tools"><summary>資料工具</summary>{tools}
-        {day?.key.endsWith("/bundled") && market === "JP" && <p>日本普通股取自 JPX 上市名單。SCTR 按 TOPIX 規模分組，以 Yahoo Finance 日線在本機計算。Squeeze On 和 Weak ADX 要求當日市值大於 1,000 億日圓，Turtle Soup Plus One 要求收市價大於 500 日圓。</p>}
-        {day?.coverage && <p>行情檢查通過 {day.coverage.eligible.toLocaleString()} 隻，另有 {Object.values(day.coverage.excluded).reduce((sum, n) => sum + n, 0)} 隻行情缺漏或不一致。</p>}
-      </details>
-    </main>
+      <div className="screen-tabs">
+        <a href={marketPath} aria-current={meta ? undefined : "page"} data-testid="tab-scans">Your Scans</a>
+        <a href={resultsHref} aria-current={meta ? "page" : undefined} data-testid="tab-results">Scan Results</a>
+        <p className="screen-date" data-testid="data-date">{market} 日期：{date ?? "—"}</p>
+      </div>
+      <main className="screen-wrap">
+        <section className="screen-card">
+          <div className="screen-card-head">
+            <button type="button" className="screen-menu" aria-expanded={toolsOpen} aria-label="資料工具" onClick={() => setToolsOpen(open => !open)}>≡</button>
+            <h2>{meta ? "Scan Results" : "Your Scans"}</h2>
+            <span className="screen-pill">{market === "US" ? "美國市場 (USD)" : "日本市場 (JPY)"}</span>
+            <label className="screen-import">
+              匯入快照 JSON
+              <input data-testid="import-snapshot" type="file" accept="application/json,.json" onChange={event => onImport(event.target.files?.[0])} />
+            </label>
+          </div>
+          {toolsOpen && (
+            <div className="screen-tools">
+              <label>
+                交易日期
+                <select aria-label="交易日期" disabled={!options.length} value={selected?.key ?? ""} onChange={event => onChoose(event.target.value)}>
+                  {!options.length && <option value="">尚無交易日資料</option>}
+                  {dateOptions}
+                </select>
+              </label>
+              <a href="#/workspace">進階資料工具</a>
+              {day?.coverage && <p>行情檢查通過 {day.coverage.eligible.toLocaleString()} 隻。</p>}
+            </div>
+          )}
+          {loading && !day && <p className="screen-loading" data-testid="loading-published">正在載入已公布的 2026-11-20 結果</p>}
+          {error && <p className="screen-error" role="alert">{error}</p>}
+          {day?.demo && <p className="screen-demo" role="status">示範／合成資料，並非實際行情或今日命中</p>}
+          {!meta ? (
+            <>
+              <div className="screen-info">
+                <p>You have used <strong>{used}</strong> of your <strong>6</strong> scans</p>
+                <p className="screen-source">資料日期：{date ?? "—"} ｜ {sourceNote(day, snapshotId)}</p>
+              </div>
+              <Coverage note={day?.notice} />
+              <div className="screen-table-wrap">
+                <table className="screen-table" aria-label="Your Scans">
+                  <thead>
+                    <tr>
+                      <th scope="col">✓</th>
+                      <th scope="col">SCAN NAME</th>
+                      <th scope="col" className="num">MATCHES</th>
+                      <th scope="col">MARKET RULE / SORT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {SCAN_ROUTES.map(scan => (
+                      <tr key={scan.id}>
+                        <td>
+                          <input type="checkbox" checked={enabled[scan.id]} aria-label={`使用 ${scan.en}`}
+                            onChange={event => setEnabled(current => ({ ...current, [scan.id]: event.target.checked }))} />
+                        </td>
+                        <th scope="row">
+                          <a className="scan-name" href={`${marketPath}/${scan.id}`}>{scan.en}</a>
+                          <span className="scan-zh">{scan.zh}</span>
+                        </th>
+                        <td className="num" data-testid={`count-${scan.id}`}>{count(scan.id) ?? "—"}</td>
+                        <td className="rule">{marketRule(scan.id, market)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="screen-results">
+              <Coverage note={day?.notice} />
+              <ScanResults key={market + meta.id + selected?.key} scanId={meta.id} market={market} day={day} date={date} />
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function sourceNote(day: TradingDay | null, snapshotId?: string): string {
+  if (!day) return "尚未載入快照";
+  if (day.demo) return "示範／合成資料";
+  if (day.source === "published") return snapshotId ? `已公布快照 ${snapshotId}` : "已公布快照";
+  return "瀏覽器匯入的快照";
+}
+
+function marketRule(id: string, market: MarketCode): string {
+  if (id === "squeeze") return market === "JP" ? "條件同時成立；市值 > 1,000 億日圓" : "條件同時成立；市值 > 10 億美元";
+  if (id === "turtle") return market === "JP" ? "條件同時成立；收市 > 500 日圓" : "條件同時成立；收市 > 5 美元";
+  if (id === "weak") return market === "JP" ? "大型或中型（括號）＋市值 > 1,000 億日圓" : "大型或中型（括號）＋市值 > 100 億美元";
+  return SCAN_ROUTES.find(scan => scan.id === id)?.rule ?? "";
+}
+
+function Coverage({ note }: { note?: string }): ReactNode {
+  if (!note) return null;
+  return (
+    <details className="screen-caveat">
+      <summary>覆蓋範圍與限制</summary>
+      <p className="publication-note" data-testid="publication-note">{note}</p>
+    </details>
   );
 }

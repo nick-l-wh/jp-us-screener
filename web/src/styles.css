@@ -185,6 +185,96 @@ body:has(.market-page) {
   .market-page .dense :is(th, td) { font-size: 14px; padding: 8px 5px; }
 }
 
+body:has(.screen-shell) {
+  background: #eef3f8;
+  color-scheme: light;
+}
+.screen-shell {
+  --text: #1c2b3a;
+  --muted: #66788a;
+  --line: #e3eaf1;
+  min-height: 100vh;
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif;
+}
+.screen-bar {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  padding: 16px 28px; background: #0e2444; color: #fff;
+}
+.screen-bar h1 { margin: 0; color: #fff; font-size: 22px; font-weight: 750; letter-spacing: 0; }
+.screen-toggle { display: flex; padding: 3px; background: #16315c; border-radius: 8px; }
+.screen-toggle a {
+  color: #d7e4f5; text-decoration: none; padding: 7px 14px; border-radius: 6px; font-weight: 650;
+}
+.screen-toggle a[aria-current] { background: #2f6fed; color: #fff; }
+.screen-tabs {
+  display: flex; align-items: center; gap: 4px; padding: 0 28px;
+  background: #fff; border-bottom: 1px solid #e4eaf1;
+}
+.screen-tabs a {
+  margin-right: 18px; padding: 14px 2px; color: #66788a; text-decoration: none; font-weight: 650;
+}
+.screen-tabs a[aria-current] { color: #2f6fed; box-shadow: inset 0 -2px 0 #2f6fed; }
+.screen-date { margin: 0 0 0 auto; color: #8b97a6; font-size: 14px; }
+.screen-wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 48px; }
+.screen-card { background: #fff; border-radius: 14px; box-shadow: 0 10px 28px #0e244414; overflow: hidden; }
+.screen-card-head {
+  display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: #2f6fed; color: #fff;
+}
+.screen-card-head h2 { margin: 0; color: #fff; font-size: 20px; font-weight: 750; }
+.screen-menu {
+  width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent; color: #fff; font-size: 22px;
+}
+.screen-pill { padding: 3px 10px; border-radius: 999px; background: #ffffff2e; font-size: 13px; }
+.screen-import {
+  margin-left: auto; background: #fff; color: #1d4ed8; border-radius: 8px; padding: 8px 12px; font-weight: 700; cursor: pointer;
+}
+.screen-import input { display: none; }
+.screen-tools, .screen-info, .screen-caveat, .screen-loading, .screen-error, .screen-demo { margin: 16px 18px; }
+.screen-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--muted); }
+.screen-tools select { margin-left: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text); }
+.screen-info { padding: 12px 16px; border-radius: 10px; background: #e7f1ff; color: #1e3a5f; }
+.screen-info p { margin: 0; }
+.screen-info p + p, .screen-source { margin-top: 4px; font-size: 13px; color: #3d5874; }
+.screen-caveat { color: #3d4f63; }
+.screen-caveat summary { cursor: pointer; width: fit-content; font-weight: 650; }
+.screen-caveat .publication-note { margin-top: 8px; }
+.screen-error { padding: 10px 12px; border-radius: 8px; background: #fde8e8; color: #8a1f1f; }
+.screen-demo { padding: 10px 12px; border-radius: 8px; background: #fff4e5; color: #6a4b12; }
+.screen-table-wrap { padding: 6px 18px 22px; }
+.screen-table { width: 100%; border-collapse: collapse; }
+.screen-table thead th {
+  background: #0e2444; color: #fff; border-top: 0; padding: 11px 14px; font-size: 12px; letter-spacing: 0.04em; font-weight: 700;
+}
+.screen-table td, .screen-table tbody th { padding: 14px; border-top: 1px solid #e6edf3; font-weight: 450; white-space: normal; }
+.screen-table tbody tr { cursor: default; }
+.screen-table tbody tr:hover { background: #f7fbff; }
+.screen-table .num { text-align: right; font-weight: 750; font-variant-numeric: tabular-nums; }
+.screen-table thead .num { text-align: right; }
+.scan-name { color: #2f6fed; font-weight: 700; text-decoration: none; }
+.scan-name:hover { text-decoration: underline; }
+.scan-zh { margin-left: 8px; color: #8b97a6; font-weight: 450; }
+.screen-table .rule { color: #44586b; }
+.screen-results { padding: 0 8px 18px; }
+.screen-shell .app { max-width: none; margin: 0; padding: 8px 10px 0; background: transparent; color: var(--text); }
+.screen-shell .table-wrap { border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.screen-shell table.dense { min-width: 0; color: var(--text); }
+.screen-shell .dense :is(th, td) { border-top-color: var(--line); }
+.screen-shell thead th { background: #0e2444; color: #fff; }
+.screen-shell .dense th button { color: #fff; font-weight: 700; }
+.screen-shell tbody tr:hover { background: #f3f8ff; }
+.screen-shell .toolbar input { background: #fff; color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+.screen-shell .quiet { color: var(--muted); }
+.screen-shell :focus-visible { outline-color: #2f6fed; }
+@media (max-width: 720px) {
+  .screen-bar, .screen-tabs { padding-left: 14px; padding-right: 14px; }
+  .screen-bar { align-items: flex-start; flex-direction: column; }
+  .screen-date { margin-left: 0; }
+  .screen-card-head { flex-wrap: wrap; }
+  .screen-import { margin-left: 0; }
+  .screen-table .rule { min-width: 160px; }
+}
+
 @media (max-width: 860px) {
   .review-grid { grid-template-columns: 1fr; }
   .workspace, .detail { grid-template-columns: 1fr; }

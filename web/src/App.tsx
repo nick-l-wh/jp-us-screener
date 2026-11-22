@@ -261,10 +261,10 @@ export function App() {
 
   if (route.kind === "scan") {
     return <MarketResults scanId={route.scanId} market={route.market} history={history} choice={chosen[route.market]} loading={loadingPublished}
-      onChoose={key => setChosen(current => ({ ...current, [route.market]: key }))} tools={<>
-      <label>匯入 Python 快照 <input type="file" accept=".json,application/json" onChange={e => void onSnapshotFile(e.target.files?.[0])} /></label>
-      {error && <p role="alert">{error}</p>}
-    </>} />;
+      snapshotId={notice?.snapshot_id ?? realSnap?.snapshot_id}
+      error={error}
+      onImport={file => void onSnapshotFile(file)}
+      onChoose={key => setChosen(current => ({ ...current, [route.market]: key }))} />;
   }
 
   return (

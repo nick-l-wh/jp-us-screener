@@ -5,12 +5,12 @@ import type { StockRow, TradingDay } from "./history";
 import { unavailableCopy } from "./publication";
 
 export const SCAN_ROUTES = [
-  { id: "adx", en: "ADX", zh: "ADX" },
-  { id: "pullback", en: "Pullback", zh: "回調" },
-  { id: "squeeze", en: "Squeeze On", zh: "擠壓開啟" },
-  { id: "turtle", en: "Turtle Soup Plus One", zh: "海龜湯加一（買入）" },
-  { id: "weak", en: "Weak ADX", zh: "弱 ADX" },
-  { id: "young", en: "Young Trend", zh: "初生趨勢" },
+  { id: "adx", en: "ADX", zh: "ADX", rule: "大/中型族群聯集 + 標準篩選" },
+  { id: "pullback", en: "Pullback", zh: "回調", rule: "依 ULCER10 由大至小排序" },
+  { id: "squeeze", en: "Squeeze On", zh: "擠壓開啟", rule: "條件全部同時成立" },
+  { id: "turtle", en: "Turtle Soup Plus One - buy", zh: "海龜湯加一（買入）", rule: "條件全部同時成立" },
+  { id: "weak", en: "Weak ADX", zh: "弱 ADX", rule: "括號內大型或中型，再加其餘條件" },
+  { id: "young", en: "Young Trend", zh: "初生趨勢", rule: "依 ROC3 由大至小排序" },
 ] as const;
 
 export type MarketCode = "US" | "JP";
