@@ -16,6 +16,20 @@ export type TradingDay = {
   scans: Record<string, { blocked: boolean; rows: StockRow[] }>;
 };
 
+const TRADING_DAYS_PER_MARKET = 15;
+
+export function recentHistory(days: TradingDay[]): Record<string, TradingDay> {
+  const dates = { US: new Set<string>(), JP: new Set<string>() };
+  const kept: Record<string, TradingDay> = {};
+  for (const day of [...days].sort((a, b) => b.date.localeCompare(a.date))) {
+    const marketDates = dates[day.market];
+    if (marketDates.size === TRADING_DAYS_PER_MARKET && !marketDates.has(day.date)) continue;
+    marketDates.add(day.date);
+    kept[day.key] = day;
+  }
+  return kept;
+}
+
 export function snapshotDays(snapshot: Snapshot): TradingDay[] {
   const days: TradingDay[] = [];
   const demo = forcesDemoBanner(snapshot);
@@ -49,25 +63,21 @@ function openHistory(): Promise<IDBDatabase> {
   });
 }
 
-export async function readHistory(): Promise<TradingDay[]> {
+export async function updateHistory(days: TradingDay[] = []): Promise<Record<string, TradingDay>> {
   const db = await openHistory();
   try {
-    return await new Promise<TradingDay[]>((resolve, reject) => {
-      const request = db.transaction("days").objectStore("days").getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  } finally { db.close(); }
-}
-
-export async function saveDays(days: TradingDay[]): Promise<void> {
-  const db = await openHistory();
-  try {
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<Record<string, TradingDay>>((resolve, reject) => {
       const tx = db.transaction("days", "readwrite");
       const store = tx.objectStore("days");
-      for (const day of days) store.put(day);
-      tx.oncomplete = () => resolve();
+      const request = store.getAll();
+      let kept: Record<string, TradingDay>;
+      request.onsuccess = () => {
+        const existing: TradingDay[] = request.result;
+        kept = recentHistory([...existing, ...days]);
+        for (const day of existing) if (!kept[day.key]) store.delete(day.key);
+        for (const day of days) if (kept[day.key]) store.put(day);
+      };
+      tx.oncomplete = () => resolve(kept);
       tx.onabort = () => reject(tx.error);
     });
   } finally { db.close(); }

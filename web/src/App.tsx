@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { readHistory, saveDays, snapshotDays, type TradingDay } from "./history";
+import { recentHistory, snapshotDays, updateHistory, type TradingDay } from "./history";
 import { asset } from "./asset";
 import { preflightCsv, toCsv, type PreflightReport } from "./csv";
 import { cohortLabel, diffLabel, formatNumber, formatRank, formatVolume, statusLabel } from "./format";
@@ -85,13 +85,13 @@ export function App() {
   const [history, setHistory] = useState<Record<string, TradingDay>>(() => {
     const data = document.getElementById("bundled-trading-days")?.textContent;
     const days: TradingDay[] = data ? JSON.parse(data) : [];
-    return Object.fromEntries(days.map(day => [day.key, day]));
+    return recentHistory(days);
   });
   const [chosen, setChosen] = useState<Partial<Record<Market, string>>>({});
   useEffect(() => {
     let active = true;
-    readHistory().then(days => {
-      if (active) setHistory(current => ({ ...Object.fromEntries(days.map(day => [day.key, day])), ...current }));
+    updateHistory().then(stored => {
+      if (active) setHistory(current => recentHistory([...Object.values(stored), ...Object.values(current)]));
     }).catch(() => undefined);
     return () => { active = false; };
   }, []);
@@ -149,14 +149,17 @@ export function App() {
       const parsed = parseSnapshot(JSON.parse(await file.text()));
       const days = snapshotDays(parsed);
       if (!days.length && route.kind === "scan") throw new Error("快照缺少美股或日股的交易日期");
-      setHistory(current => ({ ...current, ...Object.fromEntries(days.map(day => [day.key, day])) }));
+      setHistory(current => recentHistory([...Object.values(current), ...days]));
       setChosen(current => ({ ...current, ...Object.fromEntries(days.map(day => [day.market, day.key])) }));
       setRealSnap(parsed);
       setDemoOn(false);
       setError(null);
       setPane("matches");
       setSelected(null);
-      try { await saveDays(days); }
+      try {
+        const stored = await updateHistory(days);
+        setHistory(current => recentHistory([...Object.values(stored), ...Object.values(current)]));
+      }
       catch { setError("已載入本次結果。瀏覽器無法儲存歷史，重新開啟後請再匯入。"); }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "無法讀取快照");
