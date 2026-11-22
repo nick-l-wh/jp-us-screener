@@ -1,4 +1,4 @@
-"""Local CSV in, snapshot out. No network and no scheduler."""
+"""Local CSV in, snapshot out. `update` fetches real sessions and does not schedule."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ CSV_FIELDS = [
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="jp-us-screener", description="日美收市股票篩選（本地 CSV）")
+    parser = argparse.ArgumentParser(prog="jp-us-screener", description="日美收市股票篩選")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     compute = sub.add_parser("compute", help="由 OHLCV 與宇宙檔計算快照")
@@ -69,6 +69,12 @@ def main(argv: list[str] | None = None) -> int:
     provider = sub.add_parser("provider", help="顯示供應商狀態")
     provider.add_argument("--name", default="none")
 
+    update = sub.add_parser("update", help="抓取已完成的美股和日股交易日，通過檢查後才更新公開快照")
+    update.add_argument("--public-dir", default="web/public/data")
+    update.add_argument("--config", default="config/default.json")
+    update.add_argument("--cache-dir", default="data/update-cache")
+    update.add_argument("--check", action="store_true", help="只檢查名單和一檔美股、一檔日股，不寫公開快照")
+
     args = parser.parse_args(argv)
     try:
         if args.cmd == "compute":
@@ -82,6 +88,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "provider":
             NotConfiguredProvider().fetch_daily_bars("US", [], "2024-01-01", "2024-01-02")
             return 0
+        if args.cmd == "update":
+            from jp_us_screener.update import main_update
+
+            return main_update(args)
     except (ImportError_, PipelineError, ProviderNotConfigured) as exc:
         print(str(exc), file=sys.stderr)
         return 1

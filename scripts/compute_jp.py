@@ -1,4 +1,4 @@
-"""Compute one dated JP results page from the cached JPX list and Yahoo daily bars."""
+"""Old one-off JP page. The daily entrypoint is `python -m jp_us_screener update`."""
 import datetime as dt
 import itertools
 import json

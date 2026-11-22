@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { recentHistory, snapshotDays, updateHistory, type TradingDay } from "./history";
 import { asset } from "./asset";
-import { applyPublication, choosePublishedDay, hitLabel, isPublicationNotice, unavailableCopy, type PublicationNotice } from "./publication";
+import { applyPublication, choosePublishedDay, hitLabel, isPublicationNotice, publishedSession, unavailableCopy, type PublicationNotice } from "./publication";
 import { preflightCsv, toCsv, type PreflightReport } from "./csv";
 import { cohortLabel, diffLabel, formatNumber, formatRank, formatVolume, statusLabel } from "./format";
 import { MarketResults } from "./MarketResults";
@@ -143,8 +143,8 @@ export function App() {
         const published = loadedNotice;
         setChosen(current => ({
           ...current,
-          US: current.US ?? choosePublishedDay(Object.values(merged), "US", published.as_of),
-          JP: current.JP ?? choosePublishedDay(Object.values(merged), "JP", published.as_of),
+          US: current.US ?? choosePublishedDay(Object.values(merged), "US", publishedSession(published, "US")),
+          JP: current.JP ?? choosePublishedDay(Object.values(merged), "JP", publishedSession(published, "JP")),
         }));
       }
       if (!publishedSnap) setError("讀不到已公布的 2026-11-20 快照");

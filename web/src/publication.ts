@@ -7,7 +7,14 @@ export interface PublicationNotice {
   as_of: string;
   title: string;
   body: string;
+  sessions?: Record<"US" | "JP", string>;
   scans: Record<"US" | "JP", Record<string, ScanPublication>>;
+}
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function publishedSession(notice: PublicationNotice, market: "US" | "JP"): string {
+  return notice.sessions?.[market] || notice.as_of;
 }
 
 const STATUSES = new Set<ScanPublication>(["valid", "not_valid", "incomplete"]);
@@ -16,6 +23,11 @@ export function isPublicationNotice(value: unknown): value is PublicationNotice 
   if (!value || typeof value !== "object") return false;
   const record = value as Partial<PublicationNotice>;
   if (typeof record.snapshot_id !== "string" || typeof record.as_of !== "string" || typeof record.body !== "string") return false;
+  if (record.sessions !== undefined) {
+    const sessions = record.sessions as Partial<Record<"US" | "JP", unknown>>;
+    if (typeof sessions.US !== "string" || typeof sessions.JP !== "string") return false;
+    if (!DATE.test(sessions.US) || !DATE.test(sessions.JP)) return false;
+  }
   if (!record.scans || typeof record.scans !== "object") return false;
   return (["US", "JP"] as const).every((market) => {
     const scans = record.scans?.[market];
@@ -26,7 +38,7 @@ export function isPublicationNotice(value: unknown): value is PublicationNotice 
 export function applyPublication(days: TradingDay[], notice: PublicationNotice | null): TradingDay[] {
   if (!notice) return days;
   return days.map((day) => {
-    if (day.demo || day.date !== notice.as_of) return day;
+    if (day.demo || day.date !== publishedSession(notice, day.market)) return day;
     const scans = Object.fromEntries(Object.entries(day.scans).map(([id, block]) => [
       id,
       { ...block, publication: notice.scans[day.market]?.[id] ?? "valid" },

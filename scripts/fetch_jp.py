@@ -1,3 +1,4 @@
+# 這不是每日入口。每日更新用：python -m jp_us_screener update
 import concurrent.futures
 import datetime as dt
 import json
