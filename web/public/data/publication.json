@@ -1,0 +1,24 @@
+{
+  "snapshot_id": "7f53fcc6ca63a75c",
+  "as_of": "2026-11-20",
+  "title": "已公布 2026-11-20",
+  "body": "數據日期 2026-11-20。美股 ADX、回調、弱 ADX、初生趨勢沒有有效結果：公布宇宙沒有 cohort，這些掃描不會顯示成 0 筆命中。日股 ADX 未完整：TOPIX Mid400 只計入 400/401（8303 因行情損壞剔除），641A 與 646A 歷史不足，ADX 不會顯示成 0。日股回調 1 筆、弱 ADX 1 筆、海龜湯 68 筆，以及美股擠壓 2 筆、海龜湯 113 筆，是在已入計的股票上算出的結果。日股排名用全部大型 100 檔加中型 400 檔。美股擠壓與海龜是 4,862/5,192 檔有完整當日行情的子集。初生趨勢 0 筆是這 500 檔入計日股的計算結果。",
+  "scans": {
+    "US": {
+      "adx": "not_valid",
+      "pullback": "not_valid",
+      "squeeze": "valid",
+      "turtle": "valid",
+      "weak": "not_valid",
+      "young": "not_valid"
+    },
+    "JP": {
+      "adx": "incomplete",
+      "pullback": "valid",
+      "squeeze": "valid",
+      "turtle": "valid",
+      "weak": "valid",
+      "young": "valid"
+    }
+  }
+}

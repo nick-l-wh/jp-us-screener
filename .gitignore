@@ -12,7 +12,7 @@ web/dist/
 web/node_modules/
 
 # Raw histories, local snapshots, and secrets stay out of git.
-data/
+/data/
 snapshots/
 *.key
 *.pem

@@ -12,8 +12,10 @@ export type TradingDay = {
   market: Market;
   date: string;
   demo: boolean;
+  source?: "published" | "import";
+  notice?: string;
   coverage?: { eligible: number; excluded: Record<string, number> };
-  scans: Record<string, { blocked: boolean; rows: StockRow[] }>;
+  scans: Record<string, { blocked: boolean; rows: StockRow[]; publication?: "valid" | "not_valid" | "incomplete" }>;
 };
 
 const TRADING_DAYS_PER_MARKET = 15;

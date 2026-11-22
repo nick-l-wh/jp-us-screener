@@ -151,6 +151,11 @@ body:has(.market-page) {
 .market-page header :focus-visible { outline-color: #f8d088; }
 .market-date, .back-link, .market-tools, .market-page .provenance { font-size: 14px; color: var(--muted); }
 .market-date { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 0; }
+.market-asof { margin: 0; color: #f8d088; font-weight: 700; }
+.publication-note {
+  margin: 0 0 16px; padding: 12px 14px; border: 1px solid #e2b657; border-radius: 10px;
+  background: #fff8e8; color: #3d3112; line-height: 1.55;
+}
 .market-date select { max-width: 100%; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text); font: inherit; }
 .back-link { display: inline-block; margin-bottom: 12px; }
 .market-table, .market-page .table-wrap {

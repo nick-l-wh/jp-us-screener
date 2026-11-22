@@ -1,20 +1,25 @@
 import type { ReactNode } from "react";
 import { SCAN_ROUTES, ScanResults, type MarketCode } from "./ScanResults";
 import type { TradingDay } from "./history";
+import { hitLabel } from "./publication";
 
 
 
-export function MarketResults({ market, scanId, history, choice, onChoose, tools }: {
+export function MarketResults({ market, scanId, history, choice, onChoose, tools, loading }: {
   market: MarketCode;
   scanId: string | null;
   history: Record<string, TradingDay>;
   choice?: string;
   onChoose: (key: string) => void;
   tools: ReactNode;
+  loading?: boolean;
 }) {
   const marketPath = "#/" + market.toLowerCase();
   const options = Object.values(history).filter(day => day.market === market).map(day => ({
-    key: day.key, date: day.date, label: day.demo ? "示範／合成資料" : "本機快照", demo: day.demo,
+    key: day.key,
+    date: day.date,
+    label: day.demo ? "示範／合成資料" : day.source === "published" ? "已公布" : "匯入快照",
+    demo: day.demo,
   }));
   options.sort((a, b) => Number(a.demo) - Number(b.demo) || b.date.localeCompare(a.date) || a.key.localeCompare(b.key));
   const selected = options.find(option => option.key === choice) ?? options[0];
@@ -31,7 +36,8 @@ export function MarketResults({ market, scanId, history, choice, onChoose, tools
   function count(id: string) {
     if (!date) return null;
     const block = day?.scans[id];
-    return block && !block.blocked ? block.rows.length : null;
+    if (!block) return null;
+    return hitLabel(block.publication, block.blocked ? null : block.rows.length, block.blocked);
   }
 
   return (
@@ -53,14 +59,17 @@ export function MarketResults({ market, scanId, history, choice, onChoose, tools
             {dateOptions}
           </select>
           {selected?.demo && <span>示範／合成資料</span>}
+          {date && <p className="market-asof" data-testid="data-date">{day?.source === "published" ? "已公布數據日期" : "數據日期"} {date}</p>}
         </div>
       </header>
+      {loading && !day && <p data-testid="loading-published">正在載入已公布的 2026-11-20 結果</p>}
+      {day?.notice && <p className="publication-note" data-testid="publication-note">{day.notice}</p>}
       {!meta ? (
         <div className="market-table"><table aria-label="掃描命中數">
           <thead><tr><th>掃描</th><th>命中數</th></tr></thead>
           <tbody>{SCAN_ROUTES.map(scan => <tr key={scan.id}>
             <th scope="row"><a href={`${marketPath}/${scan.id}`}>{scan.en}</a></th>
-            <td>{count(scan.id) ?? "—"}</td>
+            <td data-testid={`count-${scan.id}`}>{count(scan.id) ?? "—"}</td>
           </tr>)}</tbody>
         </table></div>
       ) : (

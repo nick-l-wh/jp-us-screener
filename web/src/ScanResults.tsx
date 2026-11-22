@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import { formatVolume } from "./format";
 import type { StockRow, TradingDay } from "./history";
+import { unavailableCopy } from "./publication";
 
 export const SCAN_ROUTES = [
   { id: "adx", en: "ADX", zh: "ADX" },
@@ -20,6 +21,7 @@ export function ScanResults({ scanId, market, day, date }: { scanId: string; mar
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "symbol", dir: "asc" });
   const block = day?.scans[scanId];
+  const unavailable = unavailableCopy(block?.publication ?? "valid");
   const displayRows = block?.rows ?? EMPTY_ROWS;
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -35,7 +37,9 @@ export function ScanResults({ scanId, market, day, date }: { scanId: string; mar
 
   return (
     <div className="app results-app" data-testid="scan-results" data-market={market}>
-      {!date || (day && (!block || block.blocked)) ? (
+      {unavailable ? (
+        <p className="publication-note" data-testid="scan-unavailable">{unavailable}</p>
+      ) : !date || (day && (!block || block.blocked)) ? (
         <p className="quiet" data-testid="jp-empty">{block?.blocked ? "待設定日股篩選門檻" : "尚未有這項掃描的結果"}</p>
       ) : (
         <>

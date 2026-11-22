@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { recentHistory, snapshotDays, updateHistory, type TradingDay } from "./history";
 import { asset } from "./asset";
+import { applyPublication, choosePublishedDay, hitLabel, isPublicationNotice, unavailableCopy, type PublicationNotice } from "./publication";
 import { preflightCsv, toCsv, type PreflightReport } from "./csv";
 import { cohortLabel, diffLabel, formatNumber, formatRank, formatVolume, statusLabel } from "./format";
 import { MarketResults } from "./MarketResults";
@@ -88,15 +89,69 @@ export function App() {
     return recentHistory(days);
   });
   const [chosen, setChosen] = useState<Partial<Record<Market, string>>>({});
-  useEffect(() => {
-    let active = true;
-    updateHistory().then(stored => {
-      if (active) setHistory(current => recentHistory([...Object.values(stored), ...Object.values(current)]));
-    }).catch(() => undefined);
-    return () => { active = false; };
-  }, []);
+  const [notice, setNotice] = useState<PublicationNotice | null>(null);
+  const [loadingPublished, setLoadingPublished] = useState(true);
   const [realSnap, setRealSnap] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const importedRef = useRef(false);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      let loadedNotice: PublicationNotice | null = null;
+      let publishedDays: TradingDay[] = [];
+      let publishedSnap: Snapshot | null = null;
+      try {
+        const [noticeResponse, snapshotResponse] = await Promise.all([
+          fetch(asset("data/publication.json")),
+          fetch(asset("data/latest.json")),
+        ]);
+        if (noticeResponse.ok) {
+          const parsed = await noticeResponse.json();
+          if (isPublicationNotice(parsed)) loadedNotice = parsed;
+        }
+        if (snapshotResponse.ok) {
+          publishedSnap = parseSnapshot(await snapshotResponse.json());
+          if (loadedNotice && publishedSnap.snapshot_id !== loadedNotice.snapshot_id) loadedNotice = null;
+          publishedDays = applyPublication(snapshotDays(publishedSnap), loadedNotice);
+        }
+      } catch {
+        loadedNotice = null;
+      }
+      if (!active) return;
+      setNotice(loadedNotice);
+      let stored: Record<string, TradingDay> = {};
+      try {
+        stored = await updateHistory(publishedDays);
+      } catch {
+        stored = recentHistory(publishedDays);
+      }
+      if (!active) return;
+      const merged = recentHistory([...Object.values(stored), ...publishedDays, ...Object.values(historyRef.current)]);
+      if (importedRef.current) {
+        setHistory(current => recentHistory([...Object.values(current), ...publishedDays]));
+        setLoadingPublished(false);
+        return;
+      }
+      setHistory(merged);
+      if (publishedSnap) {
+        const snap = publishedSnap;
+        setRealSnap(current => current ?? snap);
+      }
+      if (loadedNotice) {
+        const published = loadedNotice;
+        setChosen(current => ({
+          ...current,
+          US: current.US ?? choosePublishedDay(Object.values(merged), "US", published.as_of),
+          JP: current.JP ?? choosePublishedDay(Object.values(merged), "JP", published.as_of),
+        }));
+      }
+      if (!publishedSnap) setError("讀不到已公布的 2026-11-20 快照");
+      setLoadingPublished(false);
+    })();
+    return () => { active = false; };
+  }, []);
   const [market, setMarket] = useState<Market>("US");
   const [scanId, setScanId] = useState<string>("adx");
   const [query, setQuery] = useState("");
@@ -131,6 +186,7 @@ export function App() {
 
   const scan = snapshot?.scans[scanId];
   const result = scan?.markets[market];
+  const publishedNotice = notice && snapshot?.snapshot_id === notice.snapshot_id ? notice : null;
 
   const rows = useMemo(() => {
     const source = result?.matches ?? [];
@@ -145,9 +201,11 @@ export function App() {
 
   async function onSnapshotFile(file: File | undefined) {
     if (!file) return;
+    importedRef.current = true;
     try {
       const parsed = parseSnapshot(JSON.parse(await file.text()));
-      const days = snapshotDays(parsed);
+      const matchedNotice = notice && parsed.snapshot_id === notice.snapshot_id ? notice : null;
+      const days = applyPublication(snapshotDays(parsed), matchedNotice);
       if (!days.length && route.kind === "scan") throw new Error("快照缺少美股或日股的交易日期");
       setHistory(current => recentHistory([...Object.values(current), ...days]));
       setChosen(current => ({ ...current, ...Object.fromEntries(days.map(day => [day.market, day.key])) }));
@@ -202,7 +260,7 @@ export function App() {
   const selectedRow = rows.find((row) => row.qualified_symbol === selected) ?? result?.dropped.find((row) => row.qualified_symbol === selected) ?? null;
 
   if (route.kind === "scan") {
-    return <MarketResults scanId={route.scanId} market={route.market} history={history} choice={chosen[route.market]}
+    return <MarketResults scanId={route.scanId} market={route.market} history={history} choice={chosen[route.market]} loading={loadingPublished}
       onChoose={key => setChosen(current => ({ ...current, [route.market]: key }))} tools={<>
       <label>匯入 Python 快照 <input type="file" accept=".json,application/json" onChange={e => void onSnapshotFile(e.target.files?.[0])} /></label>
       {error && <p role="alert">{error}</p>}
@@ -253,6 +311,7 @@ export function App() {
                 <div><dt>快照</dt><dd>{statusLabel(snapshot.status)} · {snapshot.snapshot_id}</dd></div>
                 <div><dt>引擎</dt><dd>{snapshot.engine_version} · {snapshot.semantics_version}</dd></div>
                 <div><dt>對照</dt><dd>{snapshot.diff.note}</dd></div>
+                {publishedNotice && <div><dt>公布說明</dt><dd>{publishedNotice.body}</dd></div>}
               </dl>
             ) : (
               <p className="quiet">真實模式尚未載入快照。</p>
@@ -275,8 +334,8 @@ export function App() {
           {!snapshot && (
             <section className="empty" data-testid="empty-real">
               <p className="seal">實</p>
-              <h2>{EMPTY_REAL_MESSAGE}</h2>
-              <p>用命令列由本地 CSV 算出快照，再在這裡匯入。示範開關只會載入合成代號，不會填上看似真實的報價。</p>
+              <h2>{loadingPublished ? "正在載入已公布結果" : EMPTY_REAL_MESSAGE}</h2>
+              <p>{loadingPublished ? "數據日期 2026-11-20。" : "用命令列由本地 CSV 算出快照，再在這裡匯入。示範開關只會載入合成代號，不會填上看似真實的報價。"}</p>
             </section>
           )}
           {snapshot && scan && result && (
@@ -285,10 +344,12 @@ export function App() {
                 {SCAN_ORDER.map((id) => {
                   const block = snapshot.scans[id];
                   const count = block?.markets[market]?.counts.matches ?? 0;
+                  const status = publishedNotice?.scans[market]?.[id] ?? "valid";
+                  const blocked = block?.markets[market]?.evaluation === "blocked_needs_jp_parameters";
                   return (
                     <button key={id} type="button" role="tab" aria-selected={scanId === id} data-testid={`scan-${id}`} className={scanId === id ? "active" : ""} onClick={() => { setScanId(id); setSort(null); setSelected(null); setPane("matches"); }}>
                       <span>{block?.name_zh ?? id}</span>
-                      <strong>{block?.markets[market]?.evaluation === "blocked_needs_jp_parameters" ? "—" : count}</strong>
+                      <strong>{hitLabel(status, count, blocked)}</strong>
                     </button>
                   );
                 })}
@@ -296,7 +357,7 @@ export function App() {
               {scan.grouping_warning && <div className="warn" data-testid="grouping-warning">{GROUPING_WARNING}。暫定語意是（大型或中型）並且其餘條件，不是已核對的官方語法。</div>}
               {scan.sort && !scan.sort.direction_verified && <p className="sort-note">{scan.sort.note}</p>}
               <div className="strip" data-testid="counts">
-                <span>命中 {result.counts.matches ?? 0}</span>
+                <span>{(publishedNotice?.scans[market]?.[scanId] ?? "valid") === "valid" ? `命中 ${result.counts.matches ?? 0}` : hitLabel(publishedNotice?.scans[market]?.[scanId], result.counts.matches ?? 0, false)}</span>
                 <span>新增 {result.counts.new ?? 0}</span>
                 <span>保留 {result.counts.retained ?? 0}</span>
                 <span>剔除 {result.counts.dropped ?? result.dropped.length}</span>
@@ -316,7 +377,12 @@ export function App() {
                 <button type="button" data-testid="export-csv" onClick={exportCsv}>匯出 CSV</button>
               </div>
               {pane === "matches" && (
-                result.evaluation === "blocked_needs_jp_parameters" ? (
+                unavailableCopy(publishedNotice?.scans[market]?.[scanId] ?? "valid") ? (
+                  <section className="blocked" data-testid="scan-unavailable">
+                    <h2>{(publishedNotice?.scans[market]?.[scanId]) === "incomplete" ? "結果未完整" : "沒有有效結果"}</h2>
+                    <p>{unavailableCopy(publishedNotice?.scans[market]?.[scanId] ?? "valid")}</p>
+                  </section>
+                ) : result.evaluation === "blocked_needs_jp_parameters" ? (
                   <section className="blocked" data-testid="jp-blocked">
                     <h2>{result.message}</h2>
                     <p>這條掃描的原文限美國。美元價格與市值不會改寫成日圓。要跑日股，需要另行寫明價格、成交量與市值參數。</p>
