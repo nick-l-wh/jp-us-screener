@@ -74,8 +74,8 @@ def resolve_cohort(security: Security, config: EngineConfig) -> tuple[str | None
     assert rule.large_min is not None and rule.mid_min is not None and rule.mid_max is not None
     if cap > rule.large_min:
         return "large", "config_threshold", None
-    if rule.mid_min <= cap <= rule.mid_max:
+    if rule.mid_min < cap <= rule.mid_max:
         return "mid", "config_threshold", None
-    if rule.small_min is not None and rule.small_min <= cap < rule.mid_min:
+    if rule.small_min is not None and rule.small_min <= cap <= rule.mid_min:
         return "small", "config_threshold", None
     return None, "config_threshold", "cap_outside_configured_cohorts"

@@ -12,9 +12,10 @@ from typing import Any
 class CohortThresholds:
     """Optional user mapping from market cap to cohort.
 
-    Disabled by default. Enabling it does not make the cut official.
-    `large` is strictly greater than `large_min`. `mid` is `mid_min` <= cap <= `mid_max`.
-    When `large_min == mid_max`, the shared boundary stays in mid ("over" the large line).
+    `large` is strictly greater than `large_min`.
+    `mid` is strictly greater than `mid_min` and less than or equal to `mid_max`.
+    When `large_min == mid_max`, a cap exactly on that line stays in mid.
+    A cap equal to `mid_min`, or below it, is outside large and mid.
     """
 
     enabled: bool = False
@@ -62,27 +63,28 @@ class EngineConfig:
 def default_thresholds() -> dict[str, CohortThresholds]:
     return {
         "US": CohortThresholds(
-            enabled=False,
+            enabled=True,
             currency="USD",
-            # Published StockCharts US universe bands, stored only as a disabled reference.
-            large_min=10_000_000_000,
-            mid_min=2_000_000_000,
-            mid_max=10_000_000_000,
-            small_min=250_000_000,
+            large_min=100_000_000_000,
+            mid_min=25_000_000_000,
+            mid_max=100_000_000_000,
+            small_min=None,
             note=(
-                "未啟用。數字只是 ChartSchool 公開的美國 SCTR 宇宙說明（大型超過 100 億美元、"
-                "中型 20 億至 100 億、小型 2.5 億至 20 億），不是本引擎的官方門檻，也不會自動套用。"
-                "要使用必須在設定檔明確 enabled=true。"
+                "已啟用。大型是市值大於 1,000 億美元。中型是大於 250 億美元至 1,000 億美元。"
+                "剛好等於 250 億美元，或低過該數，不歸入大型或中型。缺市值不能分層。"
             ),
         ),
         "JP": CohortThresholds(
-            enabled=False,
-            currency=None,
-            large_min=None,
-            mid_min=None,
-            mid_max=None,
+            enabled=True,
+            currency="JPY",
+            large_min=1_000_000_000_000,
+            mid_min=250_000_000_000,
+            mid_max=1_000_000_000_000,
             small_min=None,
-            note="沒有日股官方分層。請在宇宙檔提供 cohort，或自行寫入貨幣與門檻。不會把美元門檻改成日圓。",
+            note=(
+                "已啟用。大型是市值大於 1 兆日圓（10,000 億日圓）。中型是大於 2,500 億日圓至 1 兆日圓。"
+                "剛好等於 2,500 億日圓，或低過該數，不歸入大型或中型。缺市值不能分層。"
+            ),
         ),
     }
 

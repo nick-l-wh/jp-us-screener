@@ -61,7 +61,7 @@
       "title": "PPO 參數"
     },
     {
-      "body": "cohort_thresholds.enabled 預設 false，只表示宇宙檔沒有 cohort 時不要用市值自動分大型或中型。它不會關掉 Squeeze 或 Weak 的市值過濾。請在宇宙檔填 cohort。設定檔裡的美國數字只是被停用的公開參考。",
+      "body": "宇宙檔已填 large、mid 或 small 時，以檔案為準。檔案空白時用已啟用的市值門檻：美國大型大於 1,000 億美元，中型大於 250 億至 1,000 億美元；日本大型大於 1 兆日圓，中型大於 2,500 億至 1 兆日圓。剛好等於中型下限，或低過該下限，都不算大型或中型。沒有市值不能分層。這組門檻不會改 Squeeze 或 Weak 的市值過濾。",
       "id": "cohort-config",
       "title": "族群門檻"
     },
@@ -449,7 +449,7 @@
     }
   ],
   "schema_version": "1.0.0",
-  "semantics_version": "2026-11-21.provisional.1",
+  "semantics_version": "2026-11-22.provisional.2",
   "universe_columns": [
     "market",
     "symbol",

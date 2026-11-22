@@ -6,22 +6,22 @@
   "volume_basis": "unadjusted_shares",
   "cohort_thresholds": {
     "US": {
-      "enabled": false,
+      "enabled": true,
       "currency": "USD",
-      "large_min": 10000000000,
-      "mid_min": 2000000000,
-      "mid_max": 10000000000,
-      "small_min": 250000000,
-      "note": "未啟用。數字只是 ChartSchool 公開的美國 SCTR 宇宙說明，不是本引擎自動套用的官方門檻。"
+      "large_min": 100000000000,
+      "mid_min": 25000000000,
+      "mid_max": 100000000000,
+      "small_min": null,
+      "note": "已啟用。大型是市值大於 1,000 億美元。中型是大於 250 億美元至 1,000 億美元。剛好等於 250 億美元，或低過該數，不歸入大型或中型。缺市值不能分層。"
     },
     "JP": {
-      "enabled": false,
-      "currency": null,
-      "large_min": null,
-      "mid_min": null,
-      "mid_max": null,
+      "enabled": true,
+      "currency": "JPY",
+      "large_min": 1000000000000,
+      "mid_min": 250000000000,
+      "mid_max": 1000000000000,
       "small_min": null,
-      "note": "沒有日股官方分層。請在宇宙檔提供 cohort，或自行寫入貨幣與門檻。不會把美元門檻改成日圓。"
+      "note": "已啟用。大型是市值大於 1 兆日圓（10,000 億日圓）。中型是大於 2,500 億日圓至 1 兆日圓。剛好等於 2,500 億日圓，或低過該數，不歸入大型或中型。缺市值不能分層。"
     }
   }
 }

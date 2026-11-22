@@ -61,7 +61,7 @@
       "title": "PPO 參數"
     },
     {
-      "body": "cohort_thresholds.enabled 預設 false，只表示宇宙檔沒有 cohort 時不要用市值自動分大型或中型。它不會關掉 Squeeze 或 Weak 的市值過濾。請在宇宙檔填 cohort。設定檔裡的美國數字只是被停用的公開參考。",
+      "body": "宇宙檔已填 large、mid 或 small 時，以檔案為準。檔案空白時用已啟用的市值門檻：美國大型大於 1,000 億美元，中型大於 250 億至 1,000 億美元；日本大型大於 1 兆日圓，中型大於 2,500 億至 1 兆日圓。剛好等於中型下限，或低過該下限，都不算大型或中型。沒有市值不能分層。這組門檻不會改 Squeeze 或 Weak 的市值過濾。",
       "id": "cohort-config",
       "title": "族群門檻"
     },
@@ -308,22 +308,22 @@
     "adr_policy": "unresolved",
     "cohort_thresholds": {
       "JP": {
-        "currency": null,
-        "enabled": false,
-        "large_min": null,
-        "mid_max": null,
-        "mid_min": null,
-        "note": "沒有日股官方分層。請在宇宙檔提供 cohort，或自行寫入貨幣與門檻。不會把美元門檻改成日圓。",
+        "currency": "JPY",
+        "enabled": true,
+        "large_min": 1000000000000,
+        "mid_max": 1000000000000,
+        "mid_min": 250000000000,
+        "note": "已啟用。大型是市值大於 1 兆日圓（10,000 億日圓）。中型是大於 2,500 億日圓至 1 兆日圓。剛好等於 2,500 億日圓，或低過該數，不歸入大型或中型。缺市值不能分層。",
         "small_min": null
       },
       "US": {
         "currency": "USD",
-        "enabled": false,
-        "large_min": 10000000000,
-        "mid_max": 10000000000,
-        "mid_min": 2000000000,
-        "note": "未啟用。數字只是 ChartSchool 公開的美國 SCTR 宇宙說明（大型超過 100 億美元、中型 20 億至 100 億、小型 2.5 億至 20 億），不是本引擎的官方門檻，也不會自動套用。要使用必須在設定檔明確 enabled=true。",
-        "small_min": 250000000
+        "enabled": true,
+        "large_min": 100000000000,
+        "mid_max": 100000000000,
+        "mid_min": 25000000000,
+        "note": "已啟用。大型是市值大於 1,000 億美元。中型是大於 250 億美元至 1,000 億美元。剛好等於 250 億美元，或低過該數，不歸入大型或中型。缺市值不能分層。",
+        "small_min": null
       }
     },
     "min_cohort_size": 5,
@@ -342,7 +342,7 @@
     "stale": 0
   },
   "diff": {
-    "baseline_id": "4530fb4434c4c03e",
+    "baseline_id": "fa2d58aa2c3d78ea",
     "note": "相對於上一成功快照。"
   },
   "engine_version": "0.1.0",
@@ -3049,8 +3049,8 @@
     }
   },
   "schema_version": "1.0.0",
-  "semantics_version": "2026-11-21.provisional.1",
-  "snapshot_id": "3dd030e7987c4638",
+  "semantics_version": "2026-11-22.provisional.2",
+  "snapshot_id": "10cfeab30cd274c5",
   "status": "complete_with_diagnostics",
   "universe_diagnostics": {
     "data_error": [],

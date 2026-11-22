@@ -53,7 +53,7 @@ export function choosePublishedDay(days: TradingDay[], market: "US" | "JP", publ
 }
 
 export function unavailableCopy(publication: ScanPublication): string | null {
-  if (publication === "not_valid") return "這條掃描沒有有效結果，不能顯示成 0 筆命中。美國這條需要族群排名，而公布宇宙沒有 cohort。";
-  if (publication === "incomplete") return "這條掃描未完整，不能顯示成 0 筆命中。日股 ADX 的中型族群是 TOPIX Mid400 的 400/401，另有兩檔歷史不足。";
+  if (publication === "not_valid") return "這條掃描沒有有效結果，不能顯示成 0 筆命中。";
+  if (publication === "incomplete") return "這條掃描未完整，不能顯示成 0 筆命中。";
   return null;
 }
