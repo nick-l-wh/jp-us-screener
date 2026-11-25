@@ -155,6 +155,54 @@ def test_transform_drops_future_bars_and_does_not_invent_zeros():
     assert "不會補零" in rejected_info["error"]
 
 
+def test_trailing_incomplete_bar_is_dropped_and_a_hole_is_not_filled():
+    zone = "America/New_York"
+    friday = datetime(2026, 11, 20, 16, 0, tzinfo=NY)
+    monday = datetime(2026, 11, 23, 16, 0, tzinfo=NY)
+    tuesday = datetime(2026, 11, 24, 16, 0, tzinfo=NY)
+    payload = _chart(
+        "AAPL",
+        "USD",
+        zone,
+        [(friday, 100, 100, 1000), (monday, 101, 101, 1100), (tuesday, 102, 102, 1200)],
+    )
+    payload["indicators"]["quote"][0]["close"][-1] = None
+    payload["indicators"]["adjclose"][0]["adjclose"][-1] = None
+    bars, info = transform_chart(
+        "AAPL",
+        payload,
+        "US",
+        through=date(2026, 11, 24),
+        lookback_start=date(2024, 1, 1),
+        config=EngineConfig(),
+    )
+    assert info.get("error") is None
+    assert bars is not None
+    assert [bar.date for bar in bars] == ["2026-11-20", "2026-11-23"]
+    assert bars[-1].close == 101
+    assert info["dropped_incomplete_tail"] == 1
+
+    hole = _chart(
+        "AAPL",
+        "USD",
+        zone,
+        [(friday, 100, 100, 1000), (monday, 101, 101, 1100), (tuesday, 102, 102, 1200)],
+    )
+    hole["indicators"]["quote"][0]["close"][1] = None
+    hole["indicators"]["adjclose"][0]["adjclose"][1] = None
+    rejected, rejected_info = transform_chart(
+        "AAPL",
+        hole,
+        "US",
+        through=date(2026, 11, 24),
+        lookback_start=date(2024, 1, 1),
+        config=EngineConfig(),
+    )
+    assert rejected is None
+    assert "2026-11-23" in rejected_info["error"]
+    assert "不會補零" in rejected_info["error"]
+
+
 def test_split_adjusted_volume_uses_later_split_ratio():
     assert subsequent_split_factor([(date(2020, 8, 31), 4.0)], date(2020, 8, 28)) == 4
     zone = "America/New_York"

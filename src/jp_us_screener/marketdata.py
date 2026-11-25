@@ -316,6 +316,7 @@ def transform_chart(
     splits.sort()
 
     parsed: list[tuple[date, float, float, float, float, float]] = []
+    window: list[tuple[date, list, object, object, bool, bool]] = []
     for index, timestamp in enumerate(timestamps):
         day = session_date(int(timestamp), zone)
         if day > through or day < lookback_start:
@@ -323,9 +324,24 @@ def transform_chart(
         prices = [quote.get(name, [None])[index] for name in ("open", "high", "low", "close")]
         volume = (quote.get("volume") or [None])[index]
         adj = adjusted[index] if index < len(adjusted) else None
-        if all(price is None for price in prices) and volume is None and adj is None:
+        empty = all(price is None for price in prices) and volume is None and adj is None
+        partial = (not empty) and (any(price is None for price in prices) or volume is None or adj is None)
+        window.append((day, prices, volume, adj, empty, partial))
+    # A newer bar with no close is not a completed session and is not filled in.
+    # A hole before a later completed bar still rejects the series.
+    last_complete = max((index for index, row in enumerate(window) if not row[4] and not row[5]), default=-1)
+    if last_complete < 0 and any(row[5] for row in window):
+        day = next(row[0] for row in window if row[5])
+        return None, {**info, "error": f"{day.isoformat()} 有缺價、缺量或沒有調整收市，不會補零"}
+    info["dropped_incomplete_tail"] = 0
+    for index, (day, prices, volume, adj, empty, partial) in enumerate(window):
+        if index > last_complete:
+            if partial:
+                info["dropped_incomplete_tail"] += 1
             continue
-        if any(price is None for price in prices) or volume is None or adj is None:
+        if empty:
+            continue
+        if partial:
             return None, {**info, "error": f"{day.isoformat()} 有缺價、缺量或沒有調整收市，不會補零"}
         close = float(prices[3])
         if close == 0 or float(adj) <= 0:
