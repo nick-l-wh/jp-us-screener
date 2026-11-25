@@ -11,35 +11,68 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timezone
+from email.utils import parsedate_to_datetime
 
 USER_AGENT = "jp-us-screener/0.1 (research; +https://github.com/nick-l-wh/jp-us-screener)"
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+# A longer Reset is honored by not retrying, rather than by sleeping through it.
+MAX_HONORED_RETRY_AFTER = 120.0
 
 
 def epoch(day: date) -> int:
     return int(datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp())
 
 
+def retry_after_seconds(exc: urllib.error.HTTPError, now: float | None = None) -> float | None:
+    """Parse a Retry-After header. None means the header is absent or unreadable."""
+
+    if exc.headers is None:
+        return None
+    header = exc.headers.get("Retry-After")
+    if header is None:
+        return None
+    text = str(header).strip()
+    if not text:
+        return None
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    try:
+        moment = parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    clock = time.time() if now is None else now
+    return max(0.0, moment.timestamp() - clock)
+
+
 class YahooClient:
-    def __init__(self, sleep=time.sleep) -> None:
+    def __init__(self, sleep=time.sleep, now=time.time) -> None:
         self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
         self.crumb: str | None = None
         self._sleep = sleep
+        self._now = now
         self._lock = threading.Lock()
         self.pause_until = 0.0
+        self.http_requests = 0
+        self.chart_http = 0
+        self.quote_http = 0
+        self.crumb_http = 0
 
     def _wait(self) -> None:
         while True:
             with self._lock:
-                delay = self.pause_until - time.time()
+                delay = self.pause_until - self._now()
             if delay <= 0:
                 return
             self._sleep(min(delay, 2))
 
     def _pause(self, seconds: float) -> None:
         with self._lock:
-            self.pause_until = max(self.pause_until, time.time() + seconds)
+            self.pause_until = max(self.pause_until, self._now() + seconds)
 
     def request_public(self, url: str, timeout: int = 30, retries: int = 4) -> bytes:
         """GET without the quote cookie jar, so chart downloads can run in parallel."""
@@ -53,6 +86,13 @@ class YahooClient:
         last: Exception | None = None
         for attempt in range(retries):
             self._wait()
+            self.http_requests += 1
+            if "/v8/finance/chart/" in url:
+                self.chart_http += 1
+            elif "/v7/finance/quote" in url:
+                self.quote_http += 1
+            elif "getcrumb" in url:
+                self.crumb_http += 1
             request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             try:
                 with opener(request, timeout=timeout) as response:
@@ -60,9 +100,14 @@ class YahooClient:
             except urllib.error.HTTPError as exc:
                 last = exc
                 if exc.code == 429:
+                    delay = retry_after_seconds(exc, now=self._now())
+                    if delay is None:
+                        delay = min(60.0, 2 ** (attempt + 1))
+                    elif delay > MAX_HONORED_RETRY_AFTER:
+                        raise
                     if attempt == retries - 1:
                         raise
-                    self._pause(15 * (attempt + 1))
+                    self._pause(delay)
                     continue
                 if exc.code == 404 or exc.code not in RETRY_STATUS or attempt == retries - 1:
                     raise

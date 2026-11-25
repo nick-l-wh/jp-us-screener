@@ -183,6 +183,97 @@ def accept_cap(
     return float(reported), "yahoo_market_cap"
 
 
+def _positive_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+
+
+def shares_from_quote(quote: dict | None, currency: str) -> tuple[float | None, str]:
+    """Return Yahoo shares outstanding, or (None, reason). Never returns zero."""
+
+    if not quote:
+        return None, "quote_missing"
+    if quote.get("quoteType") == "ETF":
+        return None, "provider_etf"
+    if quote.get("currency") != currency:
+        return None, "currency_mismatch"
+    shares = quote.get("sharesOutstanding")
+    if not _positive_number(shares):
+        return None, "shares_missing"
+    price = quote.get("regularMarketPrice")
+    reported = quote.get("marketCap")
+    if _positive_number(price) and _positive_number(reported):
+        implied = float(price) * float(shares)
+        if implied > 0 and abs(implied - float(reported)) / implied > 0.01:
+            return None, "cap_not_price_times_shares"
+    return float(shares), "yahoo_shares"
+
+
+def cap_from_shares(*, shares: float | None, currency: str, expected_currency: str, close: float) -> tuple[float | None, str]:
+    """Market cap is shares times this session's close. Missing shares stay missing."""
+
+    if not _positive_number(shares) or not _positive_number(close):
+        return None, "shares_missing"
+    if currency != expected_currency:
+        return None, "currency_mismatch"
+    cap = float(shares) * float(close)
+    if not math.isfinite(cap) or cap <= 0:
+        return None, "cap_invalid"
+    return cap, "shares_times_session_close"
+
+
+def resolve_cap(
+    *,
+    market: str,
+    currency: str,
+    session: date,
+    close: float,
+    quote: dict | None,
+    zone: str,
+    shares: float | None,
+    shares_currency: str,
+) -> tuple[float | None, str]:
+    """Prefer shares times the session close. A saved share count is used when no quote is accepted.
+
+    A quote whose price times shares disagrees with the reported cap by more than 1%
+    is not stored and is not turned into a cap. Saved shares then still apply.
+    """
+
+    if quote and quote.get("quoteType") == "ETF":
+        return None, "provider_etf"
+    usable_quote = quote
+    if usable_quote and usable_quote.get("currency") not in {None, currency}:
+        usable_quote = None
+    if usable_quote:
+        shares_now, share_status = shares_from_quote(usable_quote, currency)
+        if share_status == "cap_not_price_times_shares":
+            usable_quote = None
+            shares_now = None
+        if shares_now is not None:
+            cap, status = cap_from_shares(shares=shares_now, currency=currency, expected_currency=currency, close=close)
+            if cap is not None:
+                return cap, "shares_times_session_close"
+            return None, status
+        if usable_quote is not None and share_status == "shares_missing":
+            cap, status = accept_cap(
+                market=market,
+                currency=currency,
+                session=session,
+                close=close,
+                quote=usable_quote,
+                zone=zone,
+            )
+            if cap is not None:
+                return cap, status
+            if status == "provider_etf":
+                return None, status
+    if shares is not None and shares_currency == currency:
+        cap, status = cap_from_shares(shares=shares, currency=shares_currency, expected_currency=currency, close=close)
+        if cap is not None:
+            return cap, "cached_shares_times_session_close"
+        return None, status
+    return None, "quote_missing"
+
+
 def transform_chart(
     requested: str,
     payload: dict,

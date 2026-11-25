@@ -58,6 +58,8 @@ python -m jp_us_screener update
 
 寫入公開檔之後，要發布網站就提交 `web/public/data` 並推上 `main`。現有的 GitHub Pages 工作流程會部署。這條命令本身不推送。`python -m jp_us_screener update --check` 只下載名單和 AAPL、7203.T，用來確認網路，不會寫公開快照。
 
-行情快取放在 `data/update-cache/`，不進 git。不要把 cookie、crumb 或金鑰寫進倉庫。`scripts/fetch_jp.py` 和 `scripts/compute_jp.py` 是舊的單次日股腳本，不是這條入口。
+行情快取放在 `data/update-cache/`，不進 git。已保存的流通股數寫在 `shares/outstanding.json`。不要把 cookie、crumb 或金鑰寫進倉庫。`scripts/fetch_jp.py` 和 `scripts/compute_jp.py` 是舊的單次日股腳本，不是這條入口。
 
-限制：美股名單是 Nasdaq Trader 目錄裡名稱列明普通股的子集，不是整個美股市場；日股名單是 JPX 英文檔裡 TOPIX Core30、Large70、Mid400 的國內股，指數名稱不用作族群。ADR 與 OTC 仍未決議。日股市值是供應商現時流通股數乘以該交易日收市價，不是歷史申報股本。美股市值只用報價時段吻合的 Yahoo 市值；有股本時，還要和股價乘股本相差不超過 1%。沒有市值就維持空白，不會補 0。缺價、下載不足八成、有市值的代號不足一半、計算失敗，或原本有效的命中變成無效，都保留上一份公開快照。不會公布示範數據。Yahoo、Nasdaq Trader 和 JPX 都要能連上；沒有官方授權檔。
+每次更新沿用已快取的日線，只補缺少的最近交易日。報價每批 100 檔，批次之間暫停，並輪流刷新每個市場最多 100 檔，外加沒有流通股數、或收市價相對上次觀察價移動超過 25% 的代號。市值用流通股數乘以該交易日收市價，所以流通股數齊全時大多數日子不用再叫報價。HTTP 429 會按 Retry-After 或指數退避；Retry-After 超過兩分鐘就停止，不再繼續其餘報價批次。沒有流通股數的代號維持空白。
+
+限制：美股名單是 Nasdaq Trader 目錄裡名稱列明普通股的子集，不是整個美股市場；日股名單是 JPX 英文檔裡 TOPIX Core30、Large70、Mid400 的國內股，指數名稱不用作族群。ADR 與 OTC 仍未決議。日股和美股的市值都是流通股數乘以該交易日收市價，不是歷史申報股本。報價同時有股價和市值時，兩者相差超過 1% 的報價不會採用。沿用較早流通股數時，公布說明會寫明觀察日。沒有市值就維持空白，不會補 0。缺價、下載不足八成、有市值的代號不足一半、計算失敗，或原本有效的命中變成無效，都保留上一份公開快照。不會公布示範數據。Yahoo、Nasdaq Trader 和 JPX 都要能連上；沒有官方授權檔。

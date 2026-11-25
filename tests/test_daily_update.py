@@ -19,6 +19,7 @@ from jp_us_screener.marketdata import (
     choose_session,
     parse_jpx,
     parse_us_listings,
+    resolve_cap,
     subsequent_split_factor,
     transform_chart,
 )
@@ -37,7 +38,7 @@ from jp_us_screener.sessions import (
     session_cut,
     within_start_window,
 )
-from jp_us_screener.update import LoadedMarkets, LoadedSymbol, run_update
+from jp_us_screener.update import LoadedMarkets, LoadedSymbol, _fetch_charts, _fetch_quotes, run_update
 from jp_us_screener.yahoo import YahooClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -271,6 +272,223 @@ def test_failed_publish_restores_the_previous_files(tmp_path, monkeypatch):
     assert latest.read_text(encoding="utf-8") == '{"keep": true}\n'
     assert notice.read_text(encoding="utf-8") == '{"old": true}\n'
     assert not (tmp_path / dated_snapshot_name("2026-11-23", "2026-11-23")).exists()
+
+
+def test_429_honors_retry_after_and_does_not_sleep_through_a_long_reset():
+    clock = {"t": 1_000.0}
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock["t"] += seconds
+
+    client = YahooClient(sleep=sleep, now=lambda: clock["t"])
+    headers = email.message.EmailMessage()
+    headers["Retry-After"] = "5"
+    busy = urllib.error.HTTPError("http://example.test/v7/finance/quote?symbols=AAPL", 429, "busy", headers, None)
+    assert client._read("http://example.test/v7/finance/quote?symbols=AAPL", _Opener([busy, _Body(b"ok")]), 30, 4) == b"ok"
+    assert sum(sleeps) == pytest.approx(5)
+
+    sleeps.clear()
+    clock["t"] = 2_000.0
+    bare = email.message.EmailMessage()
+    first = urllib.error.HTTPError("http://example.test/v7/finance/quote?symbols=AAPL", 429, "busy", bare, None)
+    second = urllib.error.HTTPError("http://example.test/v7/finance/quote?symbols=AAPL", 429, "busy", bare, None)
+    assert client._read(
+        "http://example.test/v7/finance/quote?symbols=AAPL",
+        _Opener([first, second, _Body(b"ok")]),
+        30,
+        4,
+    ) == b"ok"
+    assert sum(sleeps) == pytest.approx(6)
+
+    stopped = YahooClient(sleep=lambda _seconds: sleeps.append(999), now=lambda: 0.0)
+    long_headers = email.message.EmailMessage()
+    long_headers["Retry-After"] = "600"
+    long_error = urllib.error.HTTPError("http://example.test/v1/test/getcrumb", 429, "busy", long_headers, None)
+    opener = _Opener([long_error, _Body(b"later")])
+    before = len(sleeps)
+    with pytest.raises(urllib.error.HTTPError):
+        stopped._read("http://example.test/v1/test/getcrumb", opener, 30, 4)
+    assert len(opener.items) == 1
+    assert len(sleeps) == before
+
+
+def test_cached_shares_publish_without_a_quote_and_missing_shares_stay_blank(tmp_path):
+    public = tmp_path / "public"
+    cache = tmp_path / "cache"
+
+    def loader(expected, cache_dir):
+        assert expected == {"US": SESSION, "JP": SESSION}
+        loaded = _loaded(SESSION, SESSION)
+        for item in loaded.symbols["US"] + loaded.symbols["JP"]:
+            item.quote = None
+            item.shares_outstanding = 1_000_000
+            item.shares_as_of = "2026-11-20"
+            item.shares_source = "published_snapshot_implied"
+            item.shares_currency = item.currency
+        loaded.symbols["US"][0].shares_outstanding = None
+        loaded.symbols["US"][0].shares_as_of = ""
+        return loaded
+
+    code = run_update(
+        public_dir=public,
+        config_path=ROOT / "config/default.json",
+        cache_dir=cache,
+        now=datetime(2026, 11, 24, 18, 30, tzinfo=HKT),
+        load=loader,
+    )
+    assert code == 0
+    universe = (cache / "inputs" / "universe.csv").read_text(encoding="utf-8")
+    assert ",0," not in universe
+    assert ",," in universe
+    notice = json.loads((public / "publication.json").read_text(encoding="utf-8"))
+    assert "沿用較早流通股數" in notice["body"]
+    assert "不會當成 0" in notice["body"]
+    snapshot = json.loads((public / "latest.json").read_text(encoding="utf-8"))
+    assert snapshot["markets"]["US"]["as_of"] == "2026-11-23"
+    assert snapshot["markets"]["JP"]["as_of"] == "2026-11-23"
+
+
+def test_no_shares_and_no_quotes_keep_the_previous_snapshot(tmp_path):
+    public = tmp_path / "public"
+    public.mkdir()
+    latest = public / "latest.json"
+    latest.write_text(_published("2026-11-20", "2026-11-20"), encoding="utf-8")
+    before = latest.read_bytes()
+
+    def loader(expected, cache_dir):
+        loaded = _loaded(SESSION, SESSION)
+        for item in loaded.symbols["US"] + loaded.symbols["JP"]:
+            item.quote = None
+        return loaded
+
+    code = run_update(
+        public_dir=public,
+        config_path=ROOT / "config/default.json",
+        cache_dir=tmp_path / "cache",
+        now=datetime(2026, 11, 24, 8, 0, tzinfo=HKT),
+        load=loader,
+    )
+    assert code == 1
+    assert latest.read_bytes() == before
+
+
+def test_quote_refresh_stops_on_429_before_the_next_batch(tmp_path):
+    items = []
+    for index in range(150):
+        item = LoadedSymbol("US", f"S{index:03d}", f"S{index:03d}", f"S{index:03d}", "XNAS", "USD", payload={"ok": True})
+        items.append(item)
+    calls = {"quotes": 0}
+
+    class Client:
+        def ensure_crumb(self):
+            return "crumb"
+
+        def quotes(self, symbols):
+            calls["quotes"] += 1
+            headers = email.message.EmailMessage()
+            raise urllib.error.HTTPError(
+                "http://example.test/v7/finance/quote",
+                429,
+                "Too Many Requests",
+                headers,
+                None,
+            )
+
+        def _sleep(self, seconds):
+            return None
+
+    stats = _fetch_quotes(Client(), items, {}, {}, {"US": SESSION, "JP": SESSION}, [tmp_path / "shares.json"])
+    assert calls["quotes"] == 1
+    assert stats["stopped"] is True
+    assert stats["batches"] == 0
+    assert not (tmp_path / "shares.json").exists()
+
+
+def test_chart_cache_skips_a_covered_span_and_429_stops_the_queue(tmp_path):
+    through = date(2026, 11, 24)
+    covered = LoadedSymbol("US", "AAPL", "AAPL", "Apple", "XNAS", "USD")
+    cache = tmp_path / "charts"
+    cache.mkdir()
+    (cache / "AAPL.json").write_text(
+        json.dumps({"version": 1, "first": "2020-01-02", "last": "2026-11-24", "payload": {"meta": {"symbol": "AAPL"}, "timestamp": []}}),
+        encoding="utf-8",
+    )
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def chart(self, symbol, start, end):
+            self.calls.append(symbol)
+            return {}
+
+        def _sleep(self, seconds):
+            return None
+
+    client = Client()
+    _fetch_charts(client, [covered], through, cache, workers=1)
+    assert client.calls == []
+    assert covered.payload["meta"]["symbol"] == "AAPL"
+
+    class Boom:
+        def __init__(self):
+            self.calls = []
+
+        def chart(self, symbol, start, end):
+            self.calls.append((symbol, start, end))
+            raise urllib.error.HTTPError("http://example.test/v8/finance/chart/" + symbol, 429, "Too Many Requests", email.message.EmailMessage(), None)
+
+        def _sleep(self, seconds):
+            return None
+
+    gap = tmp_path / "gap"
+    boom = Boom()
+    first = LoadedSymbol("US", "AAA", "AAA", "AAA", "XNAS", "USD")
+    second = LoadedSymbol("US", "BBB", "BBB", "BBB", "XNAS", "USD")
+    _fetch_charts(boom, [first, second], through, gap, workers=1)
+    assert [call[0] for call in boom.calls] == ["AAA"]
+    assert first.error and "429" in first.error
+    assert second.error and "停止" in second.error
+
+
+def test_resolve_cap_uses_saved_shares_and_does_not_invent_zero():
+    session = date(2026, 11, 23)
+    cap, status = resolve_cap(
+        market="US",
+        currency="USD",
+        session=session,
+        close=50,
+        quote=None,
+        zone="America/New_York",
+        shares=2_000_000_000,
+        shares_currency="USD",
+    )
+    assert status == "cached_shares_times_session_close"
+    assert cap == 100_000_000_000
+    missing, reason = resolve_cap(
+        market="JP",
+        currency="JPY",
+        session=session,
+        close=2500,
+        quote=None,
+        zone="Asia/Tokyo",
+        shares=None,
+        shares_currency="JPY",
+    )
+    assert missing is None and reason == "quote_missing"
+    rejected, rejected_reason = resolve_cap(
+        market="US",
+        currency="USD",
+        session=session,
+        close=50,
+        quote={"currency": "USD", "regularMarketPrice": 50, "sharesOutstanding": 10, "marketCap": 1100},
+        zone="America/New_York",
+        shares=None,
+        shares_currency="USD",
+    )
+    assert rejected is None and rejected_reason == "quote_missing"
 
 
 def test_retries_a_server_error_and_not_a_missing_symbol():
