@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import http.cookiejar
 import json
+import math
 import re
+import socket
 import threading
 import time
 import urllib.error
@@ -12,13 +14,16 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 
 from jp_us_screener.fetchbudget import YAHOO_HTTP_BUDGET, YAHOO_REQUEST_INTERVAL
+from jp_us_screener.io import atomic_write_json
 
 USER_AGENT = "jp-us-screener/0.1 (research; +https://github.com/nick-l-wh/jp-us-screener)"
 RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 # A longer Reset is honored by not retrying, rather than by sleeping through it.
 MAX_HONORED_RETRY_AFTER = 120.0
+DEFAULT_COOLDOWN = 15 * 60
 
 
 class YahooBudgetExceeded(RuntimeError):
@@ -46,7 +51,8 @@ def retry_after_seconds(exc: urllib.error.HTTPError, now: float | None = None) -
     if not text:
         return None
     try:
-        return max(0.0, float(text))
+        seconds = float(text)
+        return max(0.0, seconds) if math.isfinite(seconds) else None
     except ValueError:
         pass
     try:
@@ -67,6 +73,7 @@ class YahooClient:
         *,
         budget: int = YAHOO_HTTP_BUDGET,
         min_interval: float = YAHOO_REQUEST_INTERVAL,
+        cooldown_path: Path | None = None,
     ) -> None:
         self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
@@ -79,6 +86,13 @@ class YahooClient:
         self._next_yahoo_at = 0.0
         self.budget = budget
         self.min_interval = min_interval
+        self.cooldown_path = cooldown_path
+        self.blocked_until = 0.0
+        self.quotes_blocked_until = 0.0
+        if cooldown_path is not None and cooldown_path.exists():
+            cooldown = json.loads(cooldown_path.read_text(encoding="utf-8"))
+            self.blocked_until = float(cooldown.get("until", 0))
+            self.quotes_blocked_until = float(cooldown.get("quotes_until", 0))
         self.http_requests = 0
         self.yahoo_http = 0
         self.chart_http = 0
@@ -125,6 +139,11 @@ class YahooClient:
         try:
             while True:
                 with self._lock:
+                    deadline = self.blocked_until
+                    if "/v8/finance/chart/" not in url:
+                        deadline = max(deadline, self.quotes_blocked_until)
+                    if deadline > self._now():
+                        raise urllib.error.HTTPError(url, 429, "Yahoo 已限流，沿用快取", None, None)
                     if self.yahoo_http >= self.budget:
                         raise YahooBudgetExceeded(f"Yahoo HTTP 已達本輪上限 {self.budget}")
                     now = self._now()
@@ -169,6 +188,23 @@ class YahooClient:
                     last = exc
                     if exc.code == 429:
                         delay = retry_after_seconds(exc, now=self._now())
+                        # Authentication/quote throttling without a reset time will
+                        # affect every batch, even one containing a single symbol.
+                        is_quote = "/v8/finance/chart/" not in url
+                        stop = (attempt == retries - 1 or (delay is None and is_quote)
+                                or (delay is not None and delay > MAX_HONORED_RETRY_AFTER))
+                        if yahoo and stop:
+                            wait = DEFAULT_COOLDOWN if delay is None else max(delay, self.min_interval)
+                            until = self._now() + wait
+                            if is_quote:
+                                self.quotes_blocked_until = until
+                            else:
+                                self.blocked_until = until
+                            if self.cooldown_path is not None:
+                                atomic_write_json(self.cooldown_path, {
+                                    "until": self.blocked_until, "quotes_until": self.quotes_blocked_until,
+                                })
+                            raise
                         if delay is None:
                             delay = min(60.0, 2 ** (attempt + 1))
                         elif delay > MAX_HONORED_RETRY_AFTER:
@@ -198,6 +234,11 @@ class YahooClient:
             self.request("https://fc.yahoo.com", retries=1)
         except urllib.error.HTTPError as exc:
             if exc.code != 404:
+                raise
+        except urllib.error.URLError as exc:
+            # Some networks cannot resolve the optional cookie bootstrap host.
+            # Let the regular crumb endpoint establish its own session.
+            if not isinstance(exc.reason, socket.gaierror):
                 raise
         crumb = self.request("https://query1.finance.yahoo.com/v1/test/getcrumb").decode().strip()
         if not crumb or crumb.startswith("<") or any(char.isspace() for char in crumb):

@@ -54,7 +54,7 @@ from jp_us_screener.fetchbudget import (
     select_quote_refresh,
     usable_shares,
 )
-from jp_us_screener.io import load_ohlcv, load_universe, write_csv
+from jp_us_screener.io import load_dated_caps, load_ohlcv, load_universe, write_csv
 from jp_us_screener.marketdata import (
     caps_problem,
     choose_session,
@@ -109,6 +109,7 @@ class LoadedSymbol:
     shares_as_of: str = ""
     shares_source: str = ""
     shares_currency: str = ""
+    dated_caps: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -193,6 +194,9 @@ def assemble(loaded: LoadedMarkets, expected: dict[str, date], config: EngineCon
             if status == "provider_etf":
                 etf += 1
                 continue
+            if choice.session.isoformat() in item.dated_caps:
+                cap = item.dated_caps[choice.session.isoformat()]
+                status = "dated_csv"
             priced.append(
                 PricedSymbol(
                     market=market,
@@ -421,7 +425,7 @@ def _num(value: float) -> str:
 
 
 def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
-    client = YahooClient()
+    client = YahooClient(cooldown_path=cache_dir / "yahoo-cooldown.json")
     nasdaq = client.request_public(NASDAQ_LISTED_URL).decode("utf-8", "replace")
     other = client.request_public(OTHER_LISTED_URL).decode("utf-8", "replace")
     us_rows, us_info = parse_us_listings(nasdaq, other)
@@ -433,6 +437,14 @@ def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
         "US": [_loaded(row) for row in us_rows],
         "JP": [_loaded(row) for row in jp_rows],
     }
+    cap_path = cache_dir / "marketcap.csv"
+    dated_caps = load_dated_caps(cap_path) if cap_path.exists() else {}
+    quote_items = []
+    for market, items in symbols.items():
+        for item in items:
+            item.dated_caps = dated_caps.get((market, item.symbol), {})
+            if expected[market].isoformat() not in item.dated_caps:
+                quote_items.append(item)
     store_paths = [COMMITTED_SHARES, cache_dir / "shares-outstanding.json"]
     records = load_share_records(store_paths)
     seeded: dict[str, dict] = {}
@@ -449,17 +461,11 @@ def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
         print(f"沿用已保存或回推的流通股數 {len(records)}，本輪補入 {added}", flush=True)
     plans = {market: _prepare_charts(items, expected[market], cache_dir / "charts") for market, items in symbols.items()}
     job_counts = {market: len(jobs) for market, (jobs, _reused) in plans.items()}
-    missing_shares = 0
-    listed = 0
-    for items in symbols.values():
-        for item in items:
-            listed += 1
-            record = records.get(f"{item.market}:{item.symbol}")
-            if not usable_shares(record, item.currency):
-                missing_shares += 1
+    missing_shares = sum(not usable_shares(records.get(f"{item.market}:{item.symbol}"), item.currency)
+                         for item in quote_items)
     reserve = quote_request_reserve(
         missing_shares=missing_shares,
-        listed=listed,
+        listed=len(quote_items),
         chart_jobs=sum(job_counts.values()),
         budget=YAHOO_HTTP_BUDGET,
     )
@@ -493,12 +499,13 @@ def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
                 closes[(item.market, item.symbol)] = close
     quote_stats = _fetch_quotes(
         client,
-        [item for items in symbols.values() for item in items],
+        quote_items,
         records,
         closes,
         expected,
         store_paths,
         request_budget=client.yahoo_remaining,
+        halt_reason=stop_reason[0] if stop.is_set() else None,
     )
     _attach_shares(symbols, records)
     lines = [
@@ -758,8 +765,15 @@ def _fetch_quotes(
     store_paths: list[Path],
     *,
     request_budget: int | None = None,
+    halt_reason: str | None = None,
 ) -> dict:
     stats = {"refresh": 0, "batches": 0, "stopped": False, "received": 0, "budget": False}
+    if not items:
+        return stats
+    if halt_reason:
+        stats["stopped"] = True
+        print(f"{halt_reason}，略過 Yahoo 市值報價，使用有日期的市值檔及已保存股數", flush=True)
+        return stats
     symbol_limit = None
     if request_budget is not None:
         if request_budget < CRUMB_HTTP + 1:
@@ -873,14 +887,14 @@ def _attach_shares(symbols: dict[str, list[LoadedSymbol]], records: dict[str, di
             item.shares_currency = str(record.get("currency") or "")
 
 
-def _run_check(now: datetime) -> int:
+def _run_check(now: datetime, cache_dir: Path) -> int:
     cut = session_cut(now)
     expected = expected_sessions(cut)
     print(
         f"檢查 {ROUTINE_ID} 香港切點 {cut.isoformat()} 預期美國 {expected['US'].isoformat()} 日本 {expected['JP'].isoformat()}",
         flush=True,
     )
-    client = YahooClient()
+    client = YahooClient(cooldown_path=cache_dir / "yahoo-cooldown.json")
     config = EngineConfig()
     try:
         nasdaq = client.request_public(NASDAQ_LISTED_URL).decode("utf-8", "replace")
@@ -894,6 +908,10 @@ def _run_check(now: datetime) -> int:
         print("failed: 名單是空的", file=sys.stderr)
         return 1
     print(f"名單 美國 {len(us_rows)} 日本 {len(jp_rows)}", flush=True)
+    cap_path = cache_dir / "marketcap.csv"
+    dated_caps = load_dated_caps(cap_path) if cap_path.exists() else {}
+    records = load_share_records([COMMITTED_SHARES, cache_dir / "shares-outstanding.json"])
+    checks = []
     for market, yahoo in (("US", "AAPL"), ("JP", "7203.T")):
         through = expected[market]
         try:
@@ -913,12 +931,29 @@ def _run_check(now: datetime) -> int:
             print(f"failed: {yahoo} {info}", file=sys.stderr)
             return 1
         print(f"check {yahoo} last {bars[-1].date} bars {len(bars)}", flush=True)
-    try:
-        quotes = client.quotes(["AAPL", "7203.T"])
-    except Exception as exc:  # noqa: BLE001
-        print(f"failed: 報價失敗：{exc}", file=sys.stderr)
-        return 1
-    print(f"check quotes {len(quotes)}", flush=True)
+        symbol = yahoo.removesuffix(".T")
+        if bars[-1].date in dated_caps.get((market, symbol), {}):
+            print(f"check {yahoo} 市值來源：當日 CSV", flush=True)
+        else:
+            checks.append((market, symbol, yahoo, bars[-1]))
+    quotes = {}
+    if checks:
+        try:
+            quotes = {row["symbol"]: row for row in client.quotes([entry[2] for entry in checks])}
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"check Yahoo 報價失敗：{exc}，檢查已保存股數", flush=True)
+    for market, symbol, yahoo, bar in checks:
+        record = records.get(f"{market}:{symbol}", {})
+        currency = "USD" if market == "US" else "JPY"
+        cap, status = resolve_cap(
+            market=market, currency=currency, session=date.fromisoformat(bar.date), close=bar.close,
+            quote=quotes.get(yahoo), zone="America/New_York" if market == "US" else "Asia/Tokyo",
+            shares=record.get("shares_outstanding"), shares_currency=record.get("currency", ""),
+        )
+        if cap is None:
+            print(f"failed: {yahoo} 欠缺可用市值：{status}", file=sys.stderr)
+            return 1
+        print(f"check {yahoo} 市值來源：{status}", flush=True)
     print("check-ok")
     return 0
 
@@ -926,7 +961,7 @@ def _run_check(now: datetime) -> int:
 def main_update(args) -> int:
     now = datetime.now(timezone.utc)
     if args.check:
-        return _run_check(now)
+        return _run_check(now, Path(args.cache_dir))
     return run_update(
         public_dir=Path(args.public_dir),
         config_path=Path(args.config),

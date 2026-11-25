@@ -130,6 +130,30 @@ def load_ohlcv(path: str | Path) -> list[Bar]:
     return bars
 
 
+def load_dated_caps(path: Path) -> dict[tuple[str, str], dict[str, float]]:
+    fields, rows = read_csv(path)
+    require_columns(fields, CAP_COLUMNS, str(path))
+    caps: dict[tuple[str, str], dict[str, float]] = {}
+    for row in rows:
+        if not row["market_cap"].strip():
+            continue
+        loc = f"{path} 第 {row['_line']} 行"
+        market = row["market"].strip().upper()
+        symbol = row["symbol"].strip()
+        currency = row["market_cap_currency"].strip().upper()
+        if not symbol or currency != {"US": "USD", "JP": "JPY"}.get(market):
+            raise ImportError_(f"{loc} 市場、代號或市值貨幣有誤")
+        session = row["market_cap_as_of"].strip()
+        if _parse_iso_date(session, loc).isoformat() != session:
+            raise ImportError_(f"{loc} 市值日期必須是 YYYY-MM-DD")
+        amount = parse_number(row["market_cap"], loc, "market_cap")
+        observations = caps.setdefault((market, symbol), {})
+        if amount <= 0 or (session in observations and observations[session] != amount):
+            raise ImportError_(f"{loc} 市值非正數或同日金額衝突")
+        observations[session] = amount
+    return caps
+
+
 def load_universe(path: str | Path, marketcap_path: str | Path | None = None) -> list[Security]:
     fields, rows = read_csv(path)
     require_columns(fields, UNIVERSE_COLUMNS, str(path))

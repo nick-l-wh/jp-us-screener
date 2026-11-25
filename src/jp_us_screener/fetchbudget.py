@@ -566,6 +566,7 @@ def remember_quote(records: dict[str, dict], item, quote: dict, close: float | N
 
 def cap_coverage_note(rows: dict[str, list]) -> str:
     fresh = 0
+    from_csv = 0
     cached = 0
     missing = 0
     observed: list[str] = []
@@ -578,6 +579,8 @@ def cap_coverage_note(rows: dict[str, list]) -> str:
                 cached += 1
                 if row.shares_as_of:
                     observed.append(row.shares_as_of)
+            elif row.cap_status == "dated_csv":
+                from_csv += 1
             else:
                 fresh += 1
     if cached and observed:
@@ -588,6 +591,6 @@ def cap_coverage_note(rows: dict[str, list]) -> str:
         stale = "沒有沿用較早流通股數。"
     return (
         "本輪 Yahoo 報價算出市值 "
-        f"{fresh} 檔。其餘用已保存流通股數乘以該交易日收市價。"
+        f"{fresh} 檔，當日市值 CSV {from_csv} 檔。其餘用已保存流通股數乘以該交易日收市價。"
         f"{stale}沒有流通股數 {missing} 檔，不歸入族群，也不會當成 0。"
     )

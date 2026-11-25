@@ -12,8 +12,9 @@ import openpyxl
 import pytest
 
 from jp_us_screener.cli import main
+from jp_us_screener import update
 from jp_us_screener.config import EngineConfig
-from jp_us_screener.io import atomic_write_json
+from jp_us_screener.io import ImportError_, atomic_write_json, load_dated_caps
 from jp_us_screener.marketdata import (
     accept_cap,
     choose_session,
@@ -38,7 +39,7 @@ from jp_us_screener.sessions import (
     session_cut,
     within_start_window,
 )
-from jp_us_screener.update import LoadedMarkets, LoadedSymbol, _fetch_charts, _fetch_quotes, run_update
+from jp_us_screener.update import LoadedMarkets, LoadedSymbol, _fetch_charts, _fetch_quotes, assemble, run_update
 from jp_us_screener.yahoo import YahooBudgetExceeded, YahooClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -452,6 +453,70 @@ def test_quote_refresh_stops_on_429_before_the_next_batch(tmp_path):
     assert stats["stopped"] is True
     assert stats["batches"] == 0
     assert not (tmp_path / "shares.json").exists()
+
+
+def test_quote_throttle_stops_before_retry_and_survives_restart(tmp_path):
+    path = tmp_path / "cache" / "yahoo-cooldown.json"
+    clock = [1000.0]
+    url = "https://query1.finance.yahoo.com/v1/test/getcrumb"
+    busy = urllib.error.HTTPError(url, 429, "busy", email.message.EmailMessage(), None)
+    opener = _Opener([busy, _Body(b"ok")])
+    client = YahooClient(now=lambda: clock[0], cooldown_path=path)
+    with pytest.raises(urllib.error.HTTPError):
+        client._read(url, opener, 30, 4)
+    assert client.yahoo_http == 1
+    restarted = YahooClient(now=lambda: clock[0], cooldown_path=path)
+    with pytest.raises(urllib.error.HTTPError):
+        restarted._read(url, opener, 30, 4)
+    assert restarted.yahoo_http == 0
+    chart_url = "https://query1.finance.yahoo.com/v8/finance/chart/AAPL"
+    assert restarted._read(chart_url, _Opener([_Body(b"bars")]), 30, 1) == b"bars"
+    clock[0] += 900
+    assert restarted._read(url, opener, 30, 4) == b"ok"
+
+
+def test_daily_caps_only_apply_on_the_selected_session(tmp_path):
+    file = tmp_path / "marketcap.csv"
+    header = "market,symbol,market_cap,market_cap_currency,market_cap_as_of\n"
+    file.write_text(header + "US,AAA,123456789,USD,2026-11-23\nJP,7203,8888,JPY,2026-11-20\n")
+    caps = load_dated_caps(file)
+    loaded = _loaded(SESSION, SESSION)
+    for items in loaded.symbols.values():
+        for item in items:
+            item.dated_caps = caps.get((item.market, item.symbol), {})
+            item.quote = None
+    result = assemble(loaded, {"US": SESSION, "JP": SESSION}, EngineConfig())
+    assert result.rows["US"][0].market_cap == 123456789
+    assert result.rows["US"][0].cap_status == "dated_csv"
+    assert result.rows["JP"][0].market_cap is None
+    file.write_text(header + "JP,7203,100,USD,2026-11-23\n")
+    with pytest.raises(ImportError_):
+        load_dated_caps(file)
+
+
+def test_dated_feed_covers_both_markets_without_quote_auth(monkeypatch, tmp_path):
+    samples = {"US": _symbol("US", "AAA", SESSION), "JP": _symbol("JP", "7203", SESSION)}
+    headers = "market,symbol,market_cap,market_cap_currency,market_cap_as_of\n"
+    (tmp_path / "marketcap.csv").write_text(headers + "US,AAA,500,USD,2026-11-23\nJP,7203,800,JPY,2026-11-23\n")
+    monkeypatch.setattr(update, "COMMITTED_SHARES", tmp_path / "test-shares.json")
+    monkeypatch.setattr(YahooClient, "request_public", lambda self, url: b"directory")
+    monkeypatch.setattr(YahooClient, "ensure_crumb", lambda self: pytest.fail("unexpected Yahoo authentication"))
+    def listing(market):
+        item = samples[market]
+        return [{key: getattr(item, key) for key in ("market", "symbol", "yahoo", "name", "exchange", "currency")}]
+    monkeypatch.setattr(update, "parse_us_listings", lambda *_: (listing("US"), {"nasdaq_footer": "", "other_footer": "", "rows": 1}))
+    monkeypatch.setattr(update, "parse_jpx", lambda *_: (listing("JP"), {"effective_dates": [], "rows": 1}))
+    def cached_charts(items, through, cache):
+        for item in items:
+            item.payload = samples[item.market].payload
+        return [], len(items)
+    monkeypatch.setattr(update, "_prepare_charts", cached_charts)
+    sessions = dict.fromkeys(samples, SESSION)
+    result = assemble(update.fetch_markets(sessions, tmp_path), sessions, EngineConfig())
+    assert not result.problems
+    assert [(row.market_cap, row.cap_status) for rows in result.rows.values() for row in rows] == [
+        (500, "dated_csv"), (800, "dated_csv")
+    ]
 
 
 def test_chart_cache_skips_a_covered_span_and_429_stops_the_queue(tmp_path):
