@@ -3,12 +3,16 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from jp_us_screener.fetchbudget import (
+    YAHOO_HTTP_BUDGET,
+    chart_download_limits,
     chart_request_window,
     corporate_action_invalidates,
     fill_missing_records,
     merge_chart_payloads,
+    quote_request_reserve,
     seed_records_from_inputs,
     seed_records_from_snapshot,
+    select_chart_refresh,
     select_quote_refresh,
 )
 from jp_us_screener.update import LoadedSymbol
@@ -39,6 +43,57 @@ def test_new_split_invalidates_but_overlap_merges():
     merged = merge_chart_payloads(old, _chart([100, 200], [10.5, 11]))
     assert merged["timestamp"] == [100, 200]
     assert merged["indicators"]["quote"][0]["close"] == [10.5, 11]
+
+
+def test_chart_refresh_walks_forward_a_full_page_and_stops_at_zero():
+    items = [LoadedSymbol("US", f"S{index:02d}", f"S{index:02d}", "n", "XNAS", "USD") for index in range(8)]
+    day = date(2026, 11, 24)
+    start = (day.toordinal() * 3) % 8
+    page = [item.symbol for item in select_chart_refresh(items, session=day, limit=3)]
+    assert page == [f"S{(start + offset) % 8:02d}" for offset in range(3)]
+    nxt = (day + timedelta(days=1)).toordinal() * 3 % 8
+    assert [item.symbol for item in select_chart_refresh(items, session=day + timedelta(days=1), limit=3)] == [
+        f"S{(nxt + offset) % 8:02d}" for offset in range(3)
+    ]
+    assert select_chart_refresh(items, session=day, limit=0) == []
+    assert len(select_chart_refresh(items, session=day, limit=100)) == 8
+
+
+def test_chart_budget_splits_across_markets_and_quote_reserve_leaves_room_for_charts():
+    assert chart_download_limits({"US": 400, "JP": 80}, 11) == {"US": 6, "JP": 5}
+    assert chart_download_limits({"US": 3, "JP": 100}, 10) == {"US": 3, "JP": 7}
+    assert chart_download_limits({"US": 0, "JP": 4}, 10) == {"US": 0, "JP": 4}
+    assert quote_request_reserve(missing_shares=0, listed=1000, chart_jobs=50) == 4
+    assert quote_request_reserve(missing_shares=5000, listed=5000, chart_jobs=800) == 40
+    assert quote_request_reserve(missing_shares=5000, listed=5000, chart_jobs=0) == 52
+    assert YAHOO_HTTP_BUDGET - 40 >= 60
+
+
+def test_quote_symbol_cap_keeps_missing_shares_ahead_of_the_rotation():
+    items = [LoadedSymbol("US", f"S{index:02d}", f"S{index:02d}", "n", "XNAS", "USD", payload={"ok": True}) for index in range(10)]
+    records = {
+        f"US:{item.symbol}": {
+            "currency": "USD",
+            "shares_outstanding": 100,
+            "close_at_observation": 10,
+            "source": "yahoo_quote",
+            "shares_as_of": "2026-11-20",
+        }
+        for item in items
+    }
+    del records["US:S09"]
+    records["US:S08"]["close_at_observation"] = 10
+    closes = {("US", item.symbol): 10 for item in items}
+    closes[("US", "S08")] = 20
+    selected = select_quote_refresh(
+        items,
+        records,
+        closes,
+        session_by_market={"US": date(2026, 11, 24), "JP": date(2026, 11, 24)},
+        limit=3,
+        symbol_limit=2,
+    )
+    assert [item.symbol for item in selected] == ["S09", "S08"]
 
 
 def test_quote_refresh_is_bounded_and_still_includes_missing_and_moved_prices():

@@ -9,8 +9,12 @@ Hong Kong (UTC+8, no US daylight-saving shift), inside 07:45–08:15. This modul
 does not register a timer. It writes web/public/data only after a real snapshot
 validates. An unchanged session, a holiday carried forward, or any failure
 leaves the previous public files in place. Full price history stays under the
-gitignored data/ directory. Quote traffic is a rotating subset plus missing
-shares; HTTP 429 stops the remaining quote batches and keeps saved share counts.
+gitignored data/ directory. Each run sends at most 100 Yahoo HTTP requests
+(charts, quotes, and crumb combined). Cached charts that already cover the
+lookback are reused; a tight budget downloads a rotating page of stale or
+missing symbols and leaves the rest on disk. Every Yahoo request waits 1.5
+seconds. HTTP 429 still backs off and stops the remaining downloads. Saved
+share counts are kept.
 """
 
 from __future__ import annotations
@@ -19,11 +23,9 @@ import json
 import os
 import sys
 import threading
-import time
 import traceback
 import urllib.error
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -31,9 +33,11 @@ from pathlib import Path
 from jp_us_screener.config import EngineConfig, load_config
 from jp_us_screener.fetchbudget import (
     COMMITTED_SHARES,
+    CRUMB_HTTP,
     QUOTE_BATCH,
-    QUOTE_PACE_SECONDS,
+    YAHOO_HTTP_BUDGET,
     cap_coverage_note,
+    chart_download_limits,
     chart_request_window,
     corporate_action_invalidates,
     coverage_dates,
@@ -41,11 +45,14 @@ from jp_us_screener.fetchbudget import (
     last_adjusted_close,
     load_share_records,
     merge_chart_payloads,
+    quote_request_reserve,
     remember_quote,
     save_share_records,
     seed_records_from_inputs,
     seed_records_from_snapshot,
+    select_chart_refresh,
     select_quote_refresh,
+    usable_shares,
 )
 from jp_us_screener.io import load_ohlcv, load_universe, write_csv
 from jp_us_screener.marketdata import (
@@ -78,7 +85,7 @@ from jp_us_screener.sessions import (
     session_cut,
     within_start_window,
 )
-from jp_us_screener.yahoo import YahooClient
+from jp_us_screener.yahoo import YahooBudgetExceeded, YahooClient
 
 JPX_URL = "https://www.jpx.co.jp/english/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_e.xlsx"
 NASDAQ_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
@@ -426,8 +433,6 @@ def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
         "US": [_loaded(row) for row in us_rows],
         "JP": [_loaded(row) for row in jp_rows],
     }
-    for market, items in symbols.items():
-        _fetch_charts(client, items, expected[market], cache_dir / "charts")
     store_paths = [COMMITTED_SHARES, cache_dir / "shares-outstanding.json"]
     records = load_share_records(store_paths)
     seeded: dict[str, dict] = {}
@@ -442,6 +447,42 @@ def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
     if added:
         save_share_records(store_paths, records)
         print(f"沿用已保存或回推的流通股數 {len(records)}，本輪補入 {added}", flush=True)
+    plans = {market: _prepare_charts(items, expected[market], cache_dir / "charts") for market, items in symbols.items()}
+    job_counts = {market: len(jobs) for market, (jobs, _reused) in plans.items()}
+    missing_shares = 0
+    listed = 0
+    for items in symbols.values():
+        for item in items:
+            listed += 1
+            record = records.get(f"{item.market}:{item.symbol}")
+            if not usable_shares(record, item.currency):
+                missing_shares += 1
+    reserve = quote_request_reserve(
+        missing_shares=missing_shares,
+        listed=listed,
+        chart_jobs=sum(job_counts.values()),
+        budget=YAHOO_HTTP_BUDGET,
+    )
+    limits = chart_download_limits(job_counts, max(0, YAHOO_HTTP_BUDGET - reserve))
+    print(
+        f"Yahoo 上限 {YAHOO_HTTP_BUDGET}，預留報價 {reserve}，"
+        f"日線待補 美國 {job_counts.get('US', 0)} 日本 {job_counts.get('JP', 0)}，"
+        f"本輪下載 美國 {limits['US']} 日本 {limits['JP']}",
+        flush=True,
+    )
+    stop = threading.Event()
+    stop_reason = ["行情下載已因 429 停止"]
+    for market in ("US", "JP"):
+        jobs, reused = plans[market]
+        _download_chart_jobs(
+            client,
+            jobs,
+            expected[market],
+            reused=reused,
+            limit=limits[market],
+            stop=stop,
+            stop_reason=stop_reason,
+        )
     closes: dict[tuple[str, str], float] = {}
     for items in symbols.values():
         for item in items:
@@ -450,12 +491,20 @@ def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
             close = last_adjusted_close(item.payload, market=item.market, through=expected[item.market])
             if close is not None:
                 closes[(item.market, item.symbol)] = close
-    quote_stats = _fetch_quotes(client, [item for items in symbols.values() for item in items], records, closes, expected, store_paths)
+    quote_stats = _fetch_quotes(
+        client,
+        [item for items in symbols.values() for item in items],
+        records,
+        closes,
+        expected,
+        store_paths,
+        request_budget=client.yahoo_remaining,
+    )
     _attach_shares(symbols, records)
     lines = [
         (
             f"Yahoo HTTP chart {client.chart_http} quote {client.quote_http} crumb {client.crumb_http} "
-            f"合計 {client.http_requests}"
+            f"合計 {client.yahoo_http} 上限 {YAHOO_HTTP_BUDGET}"
         ),
         (
             f"報價批次 {quote_stats['batches']}，收到 {quote_stats['received']}，"
@@ -497,8 +546,31 @@ def _fetch_charts(
     through: date,
     cache: Path,
     *,
-    workers: int = 4,
+    workers: int = 1,
+    limit: int | None = None,
+    stop: threading.Event | None = None,
+    stop_reason: list[str] | None = None,
 ) -> None:
+    del workers  # Yahoo calls are paced one at a time; a worker pool would overlap them.
+    jobs, reused = _prepare_charts(items, through, cache)
+    _download_chart_jobs(
+        client,
+        jobs,
+        through,
+        reused=reused,
+        limit=limit,
+        stop=stop,
+        stop_reason=stop_reason,
+    )
+
+
+def _prepare_charts(
+    items: list[LoadedSymbol],
+    through: date,
+    cache: Path,
+) -> tuple[list[tuple[LoadedSymbol, Path, dict | None, date, date]], int]:
+    """Reuse a chart that already covers the lookback. Return only the gaps and misses."""
+
     cache.mkdir(parents=True, exist_ok=True)
     lookback = through - timedelta(days=LOOKBACK_DAYS)
     pending = []
@@ -520,28 +592,88 @@ def _fetch_charts(
             reused += 1
             continue
         pending.append((item, path, cached, window[0], window[1]))
-    print(f"{items[0].market if items else ''} 下載行情 {len(pending)}，沿用快取 {reused}", flush=True)
-    stop = threading.Event()
-    stagger = threading.Lock()
-    last_start = [0.0]
+    return pending, reused
+
+
+def _download_chart_jobs(
+    client: YahooClient,
+    jobs: list[tuple[LoadedSymbol, Path, dict | None, date, date]],
+    through: date,
+    *,
+    reused: int,
+    limit: int | None,
+    stop: threading.Event | None,
+    stop_reason: list[str] | None,
+) -> None:
+    """Download `limit` stale or missing charts. Leave every other symbol on its cache."""
+
+    if stop is None:
+        stop = threading.Event()
+    if stop_reason is None:
+        stop_reason = ["行情下載已因 429 停止"]
+    market = jobs[0][0].market if jobs else ""
+    lookback = through - timedelta(days=LOOKBACK_DAYS)
+    chosen_ids: set[int] | None = None
+    if limit is not None and len(jobs) > limit:
+        chosen = select_chart_refresh([job[0] for job in jobs], session=through, limit=limit)
+        chosen_ids = {id(item) for item in chosen}
+        order = {id(item): index for index, item in enumerate(chosen)}
+        ordered = [job for job in jobs if id(job[0]) in chosen_ids]
+        ordered.sort(key=lambda job: order[id(job[0])])
+    else:
+        ordered = list(jobs)
+    left = 0
+    skipped = 0
+    for job in jobs:
+        if chosen_ids is not None and id(job[0]) in chosen_ids:
+            continue
+        if chosen_ids is None:
+            continue
+        item, _path, cached, _start, _end = job
+        if cached is not None:
+            item.payload = cached["payload"]
+            item.error = None
+            left += 1
+        else:
+            item.error = "本輪 Yahoo 請求上限，沒有已保存行情"
+            skipped += 1
+    print(
+        f"{market} 下載行情 {len(ordered)}，沿用完整快取 {reused}，"
+        f"留在較舊快取 {left}，沒有快取而本輪不下載 {skipped}",
+        flush=True,
+    )
+
+    def halted_message() -> str:
+        return stop_reason[0]
+
+    def keep_cache(item: LoadedSymbol, cached: dict | None, message: str) -> None:
+        if cached is not None:
+            item.payload = cached["payload"]
+            item.error = None
+        else:
+            item.error = message
 
     def one(job: tuple[LoadedSymbol, Path, dict | None, date, date]) -> None:
         item, path, cached, start, end = job
         if stop.is_set():
-            if cached is not None:
-                item.payload = cached["payload"]
-            else:
-                item.error = "行情下載已因 429 停止"
+            keep_cache(item, cached, halted_message())
             return
-        with stagger:
-            delay = 0.1 - (time.time() - last_start[0])
-            if delay > 0:
-                client._sleep(delay)
-            last_start[0] = time.time()
+        remaining = getattr(client, "yahoo_remaining", None)
+        if remaining is not None and remaining <= 0:
+            stop_reason[0] = "行情下載已因本輪 Yahoo 上限停止"
+            stop.set()
+            keep_cache(item, cached, halted_message())
+            return
         try:
             downloaded = client.chart(item.yahoo, start, end)
+        except YahooBudgetExceeded:
+            stop_reason[0] = "行情下載已因本輪 Yahoo 上限停止"
+            stop.set()
+            keep_cache(item, cached, halted_message())
+            return
         except urllib.error.HTTPError as exc:
             if exc.code == 429:
+                stop_reason[0] = "行情下載已因 429 停止"
                 stop.set()
             if cached is not None:
                 item.payload = cached["payload"]
@@ -562,27 +694,33 @@ def _fetch_charts(
                 try:
                     downloaded = client.chart(item.yahoo, full_start, full_end)
                     cached = None
+                except YahooBudgetExceeded:
+                    stop_reason[0] = "行情下載已因本輪 Yahoo 上限停止"
+                    stop.set()
+                    item.payload = cached["payload"] if cached is not None else None
+                    if item.payload is None:
+                        item.error = halted_message()
+                    return
                 except urllib.error.HTTPError as exc:
                     if exc.code == 429:
+                        stop_reason[0] = "行情下載已因 429 停止"
                         stop.set()
                     item.payload = cached["payload"] if cached is not None else None
                     if item.payload is None:
                         item.error = str(exc)
                     return
-                except Exception as exc:  # noqa: BLE001
-                    item.payload = cached["payload"]
+                except Exception:  # noqa: BLE001
+                    item.payload = cached["payload"] if cached is not None else None
                     return
         if cached is not None:
             downloaded = merge_chart_payloads(cached["payload"], downloaded)
         _write_chart_cache(path, item, downloaded)
         item.payload = downloaded
 
-    done = 0
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for _job in pool.map(one, pending):
-            done += 1
-            if done % 250 == 0 or done == len(pending):
-                print(f"行情進度 {done}/{len(pending)}", flush=True)
+    for index, job in enumerate(ordered, start=1):
+        one(job)
+        if index % 250 == 0 or index == len(ordered):
+            print(f"行情進度 {index}/{len(ordered)}", flush=True)
 
 
 def _read_chart_cache(path: Path) -> dict | None:
@@ -618,14 +756,37 @@ def _fetch_quotes(
     closes: dict[tuple[str, str], float],
     expected: dict[str, date],
     store_paths: list[Path],
+    *,
+    request_budget: int | None = None,
 ) -> dict:
-    refresh = select_quote_refresh(items, records, closes, session_by_market=expected)
-    stats = {"refresh": len(refresh), "batches": 0, "stopped": False, "received": 0}
-    print(f"報價刷新 {len(refresh)} / {len(items)}，每批 {QUOTE_BATCH}", flush=True)
+    stats = {"refresh": 0, "batches": 0, "stopped": False, "received": 0, "budget": False}
+    symbol_limit = None
+    if request_budget is not None:
+        if request_budget < CRUMB_HTTP + 1:
+            stats["stopped"] = True
+            stats["budget"] = True
+            print("報價略過：剩餘 Yahoo 請求不夠取得 crumb 和報價，沿用已保存的流通股數", flush=True)
+            return stats
+        symbol_limit = (request_budget - CRUMB_HTTP) * QUOTE_BATCH
+    refresh = select_quote_refresh(
+        items,
+        records,
+        closes,
+        session_by_market=expected,
+        symbol_limit=symbol_limit,
+    )
+    stats["refresh"] = len(refresh)
+    budget_label = "不限" if request_budget is None else str(request_budget)
+    print(f"報價刷新 {len(refresh)} / {len(items)}，每批 {QUOTE_BATCH}，剩餘 Yahoo 請求 {budget_label}", flush=True)
     if not refresh:
         return stats
     try:
         client.ensure_crumb()
+    except YahooBudgetExceeded as exc:
+        stats["stopped"] = True
+        stats["budget"] = True
+        print(f"報價達到本輪 Yahoo 上限：{exc}", flush=True)
+        return stats
     except urllib.error.HTTPError as exc:
         stats["stopped"] = True
         if exc.code == 429:
@@ -637,12 +798,21 @@ def _fetch_quotes(
         stats["stopped"] = True
         print(f"報價 crumb 失敗：{exc}", flush=True)
         return stats
-    for index, offset in enumerate(range(0, len(refresh), QUOTE_BATCH)):
-        if index:
-            client._sleep(QUOTE_PACE_SECONDS)
+    for offset in range(0, len(refresh), QUOTE_BATCH):
+        remaining = getattr(client, "yahoo_remaining", None)
+        if remaining is not None and remaining <= 0:
+            stats["stopped"] = True
+            stats["budget"] = True
+            print("報價達到本輪 Yahoo 上限，停止其餘批次", flush=True)
+            break
         batch = refresh[offset : offset + QUOTE_BATCH]
         try:
             rows = client.quotes([item.yahoo for item in batch])
+        except YahooBudgetExceeded as exc:
+            stats["stopped"] = True
+            stats["budget"] = True
+            print(f"報價達到本輪 Yahoo 上限：{exc}", flush=True)
+            break
         except urllib.error.HTTPError as exc:
             stats["stopped"] = True
             print(f"報價批次失敗 {batch[0].yahoo}：{exc}", flush=True)

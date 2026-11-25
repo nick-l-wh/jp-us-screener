@@ -1,9 +1,16 @@
 """Bound Yahoo chart and quote traffic.
 
-Charts already on disk are reused. Quotes refresh a rotating subset, symbols
-with no saved shares, and symbols whose close moved a lot. A 429 stops the
-remaining quote batches. Caps are shares outstanding times that session's
-close. Missing shares stay missing.
+A run may send at most YAHOO_HTTP_BUDGET Yahoo HTTP requests. Chart, quote,
+and crumb attempts all count, including retries. Each Yahoo request waits
+YAHOO_REQUEST_INTERVAL seconds after the previous one. On HTTP 429, Retry-After
+is honored up to two minutes and replaces that pause when it is longer.
+
+Charts already on disk are reused. A short cache is extended only for the
+missing days. When more symbols are stale or missing than the budget allows,
+the run downloads a rotating page and leaves the rest on the cached file.
+Quotes prefer symbols with no saved shares, then closes that moved a lot,
+then a rotating slice. A 429 stops the remaining downloads. Caps are shares
+outstanding times that session's close. Missing shares stay missing.
 """
 
 from __future__ import annotations
@@ -18,7 +25,12 @@ from jp_us_screener.io import atomic_write_json
 from jp_us_screener.marketdata import session_date
 
 QUOTE_BATCH = 100
-QUOTE_PACE_SECONDS = 1.5
+YAHOO_HTTP_BUDGET = 100
+YAHOO_REQUEST_INTERVAL = 1.5
+# Cookie host plus getcrumb. Both are Yahoo HTTP and both count against the budget.
+CRUMB_HTTP = 2
+# When charts still need a download, quotes cannot take the whole budget.
+MAX_QUOTE_RESERVE = 40
 ROTATING_QUOTE_LIMIT = 100
 PRICE_MOVE_FRACTION = 0.25
 CHART_OVERLAP_DAYS = 7
@@ -183,6 +195,83 @@ def usable_shares(record: dict | None, currency: str) -> bool:
     return _positive(record.get("shares_outstanding"))
 
 
+def select_chart_refresh(items: list, *, session: date, limit: int) -> list:
+    """One page of symbols that still need a chart download.
+
+    `items` are the stale or missing names only. The page advances by `limit`
+    symbols each session, so a tight budget walks the universe instead of
+    repeating the same prefix. A limit of zero downloads nothing.
+    """
+
+    group = sorted(items, key=lambda item: (item.market, item.symbol))
+    if limit <= 0 or not group:
+        return []
+    if limit >= len(group):
+        return group
+    start = (session.toordinal() * limit) % len(group)
+    return [group[(start + offset) % len(group)] for offset in range(limit)]
+
+
+def chart_download_limits(jobs_by_market: dict[str, int], limit: int) -> dict[str, int]:
+    """Split a chart budget across markets. A market with no work gets nothing.
+
+    The larger pending list gets any remainder. Unused quota from a short list
+    is handed to the other market.
+    """
+
+    quotas = {"US": 0, "JP": 0}
+    pending = {market: max(0, jobs_by_market.get(market, 0)) for market in ("US", "JP")}
+    markets = [market for market in ("US", "JP") if pending[market] > 0]
+    if limit <= 0 or not markets:
+        return quotas
+    ordered = sorted(markets, key=lambda market: pending[market], reverse=True)
+    base, remainder = divmod(limit, len(ordered))
+    for index, market in enumerate(ordered):
+        quotas[market] = min(pending[market], base + (1 if index < remainder else 0))
+    used = sum(quotas.values())
+    if used < limit:
+        for market in ordered:
+            extra = min(pending[market] - quotas[market], limit - used)
+            quotas[market] += extra
+            used += extra
+            if used >= limit:
+                break
+    return quotas
+
+
+def quote_request_reserve(
+    *,
+    missing_shares: int,
+    listed: int,
+    chart_jobs: int,
+    budget: int = YAHOO_HTTP_BUDGET,
+) -> int:
+    """Yahoo requests to leave for crumb and quotes before chart downloads start.
+
+    Missing shares are what the cap check cannot fill from cache. One quote
+    request carries QUOTE_BATCH symbols, and crumb setup costs CRUMB_HTTP.
+    When charts are still pending, this reserve stops at MAX_QUOTE_RESERVE so
+    a rotating chart page still runs. When every chart is already cached, quotes
+    may use the whole budget.
+    """
+
+    if budget <= 0 or listed <= 0:
+        return 0
+    if missing_shares > 0:
+        wanted = missing_shares
+    else:
+        wanted = min(listed, ROTATING_QUOTE_LIMIT * 2)
+    if wanted <= 0:
+        return 0
+    batches = (wanted + QUOTE_BATCH - 1) // QUOTE_BATCH
+    reserve = CRUMB_HTTP + batches
+    if chart_jobs > 0:
+        reserve = min(reserve, MAX_QUOTE_RESERVE)
+        if reserve >= budget and budget > 1:
+            reserve = budget - 1
+    return min(reserve, max(0, budget))
+
+
 def select_quote_refresh(
     items: list,
     records: dict[str, dict],
@@ -191,41 +280,58 @@ def select_quote_refresh(
     session_by_market: dict[str, date],
     limit: int = ROTATING_QUOTE_LIMIT,
     move: float = PRICE_MOVE_FRACTION,
+    symbol_limit: int | None = None,
 ) -> list:
-    """Rotating subset, plus missing shares, plus closes that moved a lot.
+    """Missing shares, then closes that moved a lot, then a rotating slice.
 
-    The rotating slice is capped per market. Missing shares are not capped:
-    the caller stops on HTTP 429 instead of walking every remaining batch.
+    The rotating slice is capped per market. Missing shares are not capped
+    unless `symbol_limit` is set. The caller also stops on HTTP 429 and when
+    the Yahoo request budget is spent. A prefix of this list is what a short
+    budget refreshes, so names without shares come first.
     """
 
     chosen: list = []
     seen: set[tuple[str, str]] = set()
 
-    def add(item) -> None:
+    def add(item) -> bool:
+        if symbol_limit is not None and len(chosen) >= symbol_limit:
+            return False
         key = (item.market, item.symbol)
         if key in seen:
-            return
+            return True
         seen.add(key)
         chosen.append(item)
+        return True
 
+    groups: dict[str, list] = {}
     for market in ("US", "JP"):
         group = [item for item in items if item.market == market and item.payload and not item.error]
         group.sort(key=lambda item: item.symbol)
+        groups[market] = group
+
+    for market in ("US", "JP"):
+        for item in groups[market]:
+            record = records.get(f"{item.market}:{item.symbol}")
+            if not usable_shares(record, item.currency):
+                if not add(item):
+                    return chosen
+    for market in ("US", "JP"):
+        for item in groups[market]:
+            record = records.get(f"{item.market}:{item.symbol}")
+            close = closes.get((item.market, item.symbol))
+            observed = record.get("close_at_observation") if record else None
+            if close and _positive(observed) and abs(float(close) / float(observed) - 1) > move:
+                if not add(item):
+                    return chosen
+    for market in ("US", "JP"):
+        group = groups[market]
         if not group:
             continue
         session = session_by_market[market]
         start = session.toordinal() % len(group)
         for offset in range(min(limit, len(group))):
-            add(group[(start + offset) % len(group)])
-        for item in group:
-            record = records.get(f"{item.market}:{item.symbol}")
-            if not usable_shares(record, item.currency):
-                add(item)
-                continue
-            close = closes.get((item.market, item.symbol))
-            observed = record.get("close_at_observation") if record else None
-            if close and _positive(observed) and abs(float(close) / float(observed) - 1) > move:
-                add(item)
+            if not add(group[(start + offset) % len(group)]):
+                return chosen
     return chosen
 
 

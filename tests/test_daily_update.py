@@ -39,7 +39,7 @@ from jp_us_screener.sessions import (
     within_start_window,
 )
 from jp_us_screener.update import LoadedMarkets, LoadedSymbol, _fetch_charts, _fetch_quotes, run_update
-from jp_us_screener.yahoo import YahooClient
+from jp_us_screener.yahoo import YahooBudgetExceeded, YahooClient
 
 ROOT = Path(__file__).resolve().parents[1]
 SESSION = date(2026, 11, 23)
@@ -539,6 +539,176 @@ def test_resolve_cap_uses_saved_shares_and_does_not_invent_zero():
     assert rejected is None and rejected_reason == "quote_missing"
 
 
+def test_yahoo_requests_pause_between_calls_and_stop_at_the_budget():
+    clock = {"t": 10_000.0}
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock["t"] += seconds
+
+    client = YahooClient(sleep=sleep, now=lambda: clock["t"], budget=2, min_interval=1.5)
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?region=US"
+    opener = _Opener([_Body(b"a"), _Body(b"b"), _Body(b"c")])
+    assert client._read(url, opener, 30, 4) == b"a"
+    assert sleeps == []
+    assert client._read(url, opener, 30, 4) == b"b"
+    assert sleeps == [1.5]
+    with pytest.raises(YahooBudgetExceeded):
+        client._read(url, opener, 30, 4)
+    assert len(opener.items) == 1
+    assert client.yahoo_http == 2
+    assert client.chart_http == 2
+    assert client.quote_http == 0
+    assert client.crumb_http == 0
+    before = list(sleeps)
+    client._read("https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt", _Opener([_Body(b"n")]), 30, 1)
+    assert sleeps == before
+    assert client.yahoo_http == 2
+    assert client.http_requests == 3
+
+
+def test_yahoo_429_retry_after_is_not_added_on_top_of_the_pause():
+    clock = {"t": 5_000.0}
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        clock["t"] += seconds
+
+    client = YahooClient(sleep=sleep, now=lambda: clock["t"], budget=10, min_interval=1.5)
+    url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=AAPL"
+    headers = email.message.EmailMessage()
+    headers["Retry-After"] = "5"
+    busy = urllib.error.HTTPError(url, 429, "busy", headers, None)
+    assert client._read(url, _Opener([busy, _Body(b"ok")]), 30, 4) == b"ok"
+    assert sum(sleeps) == pytest.approx(5)
+    assert client.yahoo_http == 2
+    assert client.quote_http == 2
+
+    sleeps.clear()
+    clock["t"] = 8_000.0
+    short = email.message.EmailMessage()
+    short["Retry-After"] = "1"
+    short_error = urllib.error.HTTPError(url, 429, "busy", short, None)
+    assert client._read(url, _Opener([short_error, _Body(b"ok")]), 30, 4) == b"ok"
+    assert sum(sleeps) == pytest.approx(1.5)
+
+    stopped = YahooClient(sleep=lambda _seconds: sleeps.append(999), now=lambda: 9_000.0, budget=10, min_interval=1.5)
+    long_headers = email.message.EmailMessage()
+    long_headers["Retry-After"] = "600"
+    long_error = urllib.error.HTTPError("https://query1.finance.yahoo.com/v1/test/getcrumb", 429, "busy", long_headers, None)
+    opener = _Opener([long_error, _Body(b"later")])
+    before = len(sleeps)
+    with pytest.raises(urllib.error.HTTPError):
+        stopped._read("https://query1.finance.yahoo.com/v1/test/getcrumb", opener, 30, 4)
+    assert sleeps[before:] == []
+    assert len(opener.items) == 1
+    assert stopped.crumb_http == 1
+
+
+def test_chart_budget_fetches_a_rotating_subset_and_keeps_the_rest(tmp_path):
+    through = date(2026, 11, 24)
+    cache = tmp_path / "charts"
+    cache.mkdir()
+    items = []
+    for name in ("AAA", "BBB", "CCC", "DDD"):
+        item = LoadedSymbol("US", name, name, name, "XNAS", "USD")
+        items.append(item)
+        _write_stale_chart(cache / f"{name}.json", name)
+    missing = LoadedSymbol("US", "EEE", "EEE", "EEE", "XNAS", "USD")
+    items.append(missing)
+    start = (through.toordinal() * 2) % len(items)
+    expected = [items[(start + offset) % len(items)].yahoo for offset in range(2)]
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+
+        def chart(self, symbol, start, end):
+            self.calls.append((symbol, start, end))
+            return _cached_chart_payload(symbol)
+
+    client = Client()
+    _fetch_charts(client, items, through, cache, workers=1, limit=2)
+    assert [call[0] for call in client.calls] == expected
+    for symbol, start_day, end_day in client.calls:
+        if symbol == "EEE":
+            assert start_day == through - timedelta(days=800)
+        else:
+            assert start_day == date(2026, 11, 13)
+        assert end_day == date(2026, 11, 25)
+    fetched = set(expected)
+    for item in items:
+        if item.yahoo in fetched:
+            continue
+        if item.yahoo == "EEE":
+            assert item.payload is None
+            assert item.error and "上限" in item.error
+        else:
+            assert item.error is None
+            assert item.payload["meta"]["symbol"] == item.yahoo
+
+
+def test_quote_budget_trims_batches_and_skips_when_crumb_does_not_fit(tmp_path):
+    items = [
+        LoadedSymbol("US", f"S{index:03d}", f"S{index:03d}", f"S{index:03d}", "XNAS", "USD", payload={"ok": True})
+        for index in range(250)
+    ]
+    calls: list = []
+
+    class Client:
+        def ensure_crumb(self):
+            calls.append("crumb")
+            return "crumb"
+
+        def quotes(self, symbols):
+            calls.append(list(symbols))
+            return []
+
+        def _sleep(self, seconds):
+            return None
+
+    stats = _fetch_quotes(
+        Client(),
+        items,
+        {},
+        {},
+        {"US": SESSION, "JP": SESSION},
+        [tmp_path / "shares.json"],
+        request_budget=4,
+    )
+    assert calls[0] == "crumb"
+    assert [len(batch) for batch in calls[1:]] == [100, 100]
+    assert stats["stopped"] is False
+    assert stats["batches"] == 2
+
+    skipped: list = []
+
+    class Skip:
+        def ensure_crumb(self):
+            skipped.append("crumb")
+            return "crumb"
+
+        def quotes(self, symbols):
+            skipped.append(symbols)
+            return []
+
+    quiet = _fetch_quotes(
+        Skip(),
+        items,
+        {},
+        {},
+        {"US": SESSION, "JP": SESSION},
+        [tmp_path / "none.json"],
+        request_budget=2,
+    )
+    assert skipped == []
+    assert quiet["stopped"] is True
+    assert quiet["budget"] is True
+    assert not (tmp_path / "shares.json").exists()
+
+
 def test_retries_a_server_error_and_not_a_missing_symbol():
     sleeps: list[float] = []
     client = YahooClient(sleep=lambda seconds: sleeps.append(seconds))
@@ -691,6 +861,25 @@ class _Opener:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+def _cached_chart_payload(symbol: str) -> dict:
+    moment = datetime(2026, 11, 20, 16, tzinfo=NY)
+    return _chart(symbol, "USD", "America/New_York", [(moment, 10, 10, 1000)])
+
+
+def _write_stale_chart(path: Path, symbol: str) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "first": "2020-01-02",
+                "last": "2026-11-20",
+                "payload": _cached_chart_payload(symbol),
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _chart(symbol: str, currency: str, zone: str, rows: list[tuple[datetime, float | None, float | None, float | None]]) -> dict:
