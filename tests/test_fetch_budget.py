@@ -18,6 +18,7 @@ def test_chart_window_reuses_a_covered_cache_and_requests_only_the_gap():
     through = date(2026, 11, 24)
     lookback = through - timedelta(days=800)
     assert chart_request_window(cached_first=date(2020, 1, 2), cached_last=through, lookback_start=lookback, through=through) is None
+    assert chart_request_window(cached_first=lookback + timedelta(days=1), cached_last=through, lookback_start=lookback, through=through) is None
     start, end = chart_request_window(
         cached_first=date(2020, 1, 2),
         cached_last=date(2026, 11, 20),

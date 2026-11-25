@@ -46,9 +46,12 @@ def chart_request_window(
     """
 
     end = through + timedelta(days=1)
-    if cached_first is not None and cached_last is not None and cached_first <= lookback_start and cached_last >= through:
+    # The first returned bar is the next session after a weekend or holiday,
+    # so a cache that starts within a week of the lookback already has the history.
+    history_ok = cached_first is not None and cached_first <= lookback_start + timedelta(days=CHART_OVERLAP_DAYS)
+    if history_ok and cached_last is not None and cached_last >= through:
         return None
-    if cached_first is not None and cached_last is not None and cached_first <= lookback_start and cached_last < through:
+    if history_ok and cached_last is not None and cached_last < through:
         start = cached_last - timedelta(days=CHART_OVERLAP_DAYS)
         if start < lookback_start:
             start = lookback_start
