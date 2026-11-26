@@ -160,6 +160,7 @@ export function App() {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [preflight, setPreflight] = useState<PreflightReport | null>(null);
   const [rulesFallback, setRulesFallback] = useState<Snapshot["assumptions"] | null>(null);
+  const [currentRules, setCurrentRules] = useState<PublishedRules | null>(null);
 
   const snapshot = demoOn ? demoSnap : realSnap;
   const showDemo = snapshot ? forcesDemoBanner(snapshot) : demoOn;
@@ -180,11 +181,17 @@ export function App() {
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (payload?.assumptions) setRulesFallback(payload.assumptions);
+        if (payload?.semantics_version && payload?.assumptions && payload?.scans) setCurrentRules(payload);
       })
       .catch(() => undefined);
   }, []);
 
   const scan = snapshot?.scans[scanId];
+  const staleRules = Boolean(snapshot && currentRules && !rulesMatch(snapshot, currentRules));
+  const shownAssumptions = staleRules && currentRules ? currentRules.assumptions : snapshot?.assumptions ?? rulesFallback ?? [];
+  const shownScan = scan && staleRules && currentRules
+    ? { ...scan, raw_source: currentRules.scans.find((item) => item.id === scan.id)?.raw_source ?? scan.raw_source }
+    : scan;
   const result = scan?.markets[market];
   const publishedNotice = notice && snapshot?.snapshot_id === notice.snapshot_id ? notice : null;
 
@@ -311,7 +318,15 @@ export function App() {
                 <div><dt>快照</dt><dd>{statusLabel(snapshot.status)} · {snapshot.snapshot_id}</dd></div>
                 <div><dt>引擎</dt><dd>{snapshot.engine_version} · {snapshot.semantics_version}</dd></div>
                 <div><dt>對照</dt><dd>{snapshot.diff.note}</dd></div>
-                {publishedNotice && <div><dt>公布說明</dt><dd>{publishedNotice.body}</dd></div>}
+                {publishedNotice && (
+                  <div>
+                    <dt>{staleRules ? "這份快照的公布說明" : "公布說明"}</dt>
+                    <dd>
+                      {staleRules && <p className="warn">下面是這份快照當時的文字，不是 2026-11-26 的宇宙規則。現行宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。</p>}
+                      {publishedNotice.body}
+                    </dd>
+                  </div>
+                )}
               </dl>
             ) : (
               <p className="quiet">真實模式尚未載入快照。</p>
@@ -354,7 +369,7 @@ export function App() {
                   );
                 })}
               </div>
-              {scan.grouping_warning && <div className="warn" data-testid="grouping-warning">{GROUPING_WARNING}。暫定語意是（大型或中型）並且其餘條件，不是已核對的官方語法。</div>}
+              {scan.grouping_warning && <div className="warn" data-testid="grouping-warning">{GROUPING_WARNING}。暫定語意是（大型或中型欄位）並且其餘條件，不是已核對的官方語法。這不是市值分層；2026-11-26 起整份指數放在同一個排名池。</div>}
               {scan.sort && !scan.sort.direction_verified && <p className="sort-note">{scan.sort.note}</p>}
               <div className="strip" data-testid="counts">
                 <span>{(publishedNotice?.scans[market]?.[scanId] ?? "valid") === "valid" ? `命中 ${result.counts.matches ?? 0}` : hitLabel(publishedNotice?.scans[market]?.[scanId], result.counts.matches ?? 0, false)}</span>
@@ -385,14 +400,19 @@ export function App() {
                 ) : result.evaluation === "blocked_needs_jp_parameters" ? (
                   <section className="blocked" data-testid="jp-blocked">
                     <h2>{result.message}</h2>
-                    <p>這條掃描的原文限美國。美元價格與市值不會改寫成日圓。要跑日股，需要另行寫明價格、成交量與市值參數。</p>
+                    <p>這條掃描的原文限美國。真實模式會跑日股：Squeeze 不再另加市值條件，Turtle 的收市價用 500 日圓。美元價格不會改寫成日圓。</p>
                   </section>
                 ) : (
                   <Results rows={rows} dropped={result.dropped} scanId={scanId} sort={sort} onSort={(key) => setSort((current) => ({ key, dir: current?.key === key && current.dir === "desc" ? "asc" : "desc" }))} selected={selected} onSelect={setSelected} />
                 )
               )}
               {pane === "diagnostics" && <Diagnostics snapshot={snapshot} market={market} result={result} />}
-              {pane === "rules" && <Rules scan={scan} assumptions={snapshot.assumptions} />}
+              {pane === "rules" && shownScan && (
+                <>
+                  {staleRules && <p className="warn" data-testid="rules-version-note">載入的快照是較早的規則版本。下面是 2026-11-26 的現行規則：宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。快照數字要等下一次用本機價格通過檢查才會換。</p>}
+                  <Rules scan={shownScan} assumptions={shownAssumptions} />
+                </>
+              )}
               {selectedRow && pane === "matches" && <Detail row={selectedRow} rankLabel={snapshot.rank_label} />}
             </>
           )}
@@ -403,6 +423,16 @@ export function App() {
       </div>
     </div>
   );
+}
+
+interface PublishedRules {
+  semantics_version: string;
+  assumptions: Snapshot["assumptions"];
+  scans: { id: string; raw_source: string }[];
+}
+
+function rulesMatch(snapshot: Snapshot, rules: PublishedRules): boolean {
+  return snapshot.semantics_version === rules.semantics_version || snapshot.semantics_version === `${rules.semantics_version}.jp-yen`;
 }
 
 function defaultSort(spec: { field: string; direction: string } | null | undefined): { key: string; dir: "asc" | "desc" } | null {

@@ -15,7 +15,7 @@ ASSUMPTIONS: list[dict[str, str]] = [
     {
         "id": "grouping",
         "title": "條件分組待核對",
-        "body": "ADX、Pullback、Young Trend 的原文是沒有括號的 OR 然後 AND。本引擎的暫定語意是（大型或中型）並且其餘條件同時成立。這不等於已核對的掃描器語法。Weak ADX 原文有括號，依括號計算。",
+        "body": "ADX、Pullback、Young Trend 的原文是沒有括號的 OR 然後 AND。本引擎的暫定語意是（大型或中型欄位）並且其餘條件同時成立。這不等於已核對的掃描器語法，也不是市值分層。Weak ADX 原文有括號，依括號計算。2026-11-26 起整份指數放在同一個排名池。",
     },
     {
         "id": "rolling-di",
@@ -30,7 +30,7 @@ ASSUMPTIONS: list[dict[str, str]] = [
     {
         "id": "universe",
         "title": "股票宇宙",
-        "body": "只保留美國與日本的股票。ETF 在計算族群排名和六條掃描之前剔除。security_type 缺漏、unknown 或其他類型會剔除並寫入診斷，不會假設成股票。Young Trend 原文沒有類型條款，股票限定是本引擎的宇宙政策。",
+        "body": "公布的宇宙是指數名單，不是市值分層。美股是 Russell 1000，起步檔是 iShares IWB 2026-11-24 的權益證券持股（ETF 持股代理，不是富時羅素官方名單）。日股是 TOPIX 500，即 TOPIX Core30、Large70 與 Mid400，起步檔是 JPX 2026-10-30 生效的官方成分（501 檔）。不會再用舊的市值區間剔除。ETF 在計算排名和六條掃描之前剔除。security_type 缺漏、unknown 或其他類型會剔除並寫入診斷，不會假設成股票。Young Trend 原文沒有類型條款，股票限定是本引擎的宇宙政策。",
     },
     {
         "id": "adr-otc",
@@ -40,7 +40,7 @@ ASSUMPTIONS: list[dict[str, str]] = [
     {
         "id": "adjustment",
         "title": "除權息與成交量",
-        "body": "OHLC 必須整列標成 split_and_dividend，與檢視當時「adjusted for dividends」的語境一致。引擎不混合調整制度，也不在這裡重算股息。成交量是未調整股數，不是成交金額。",
+        "body": "OHLC 必須整列標成 split_and_dividend，與檢視當時「adjusted for dividends」的語境一致。引擎不混合調整制度，也不在這裡重算股息。成交量是股數，不是成交金額。Yahoo 日線路徑會依拆股事件還原股數。本機 CSV 沒有拆股事件，成交量用檔內數字，不會改寫成拆股前股數，也不會補 0。",
     },
     {
         "id": "calendar",
@@ -50,17 +50,17 @@ ASSUMPTIONS: list[dict[str, str]] = [
     {
         "id": "cap",
         "title": "市值",
-        "body": "市值只用檔案裡帶貨幣的數字，不從 OHLCV 反推。Squeeze 大於 1,000 百萬美元（1e9 USD），Weak 大於 10,000 百萬美元（1e10 USD）。這兩個過濾一直生效。缺市值或貨幣不是 USD 時，該列是未滿足依賴，不會變成命中，也不會換算成日圓。",
+        "body": "2026-11-26 起，市值不再用來劃分宇宙，不再作為 Squeeze 或 Weak ADX 的條件，也不再要求至少一半代號有市值才可公布。檔案裡若有帶貨幣的市值會照實留下；沒有就留空，不會當成 0，也不會用股價或示範數據補上。",
     },
     {
         "id": "jp-us-only-scans",
         "title": "只限美國的兩條",
-        "body": "Squeeze 與 Turtle 原文限美國。日本市場這兩條顯示「需要日股適配參數」，不會套用美國規則。Squeeze 沒有 close > 5；那一條只在 Turtle，也不會改成 5 日圓。",
+        "body": "Squeeze 與 Turtle 原文限美國。真實模式會跑日股：Squeeze 不再另加市值條件，Turtle Soup Plus One 的收市價大於 500 日圓。美元價格不會改寫成日圓。Squeeze 沒有 close > 5；那一條只在 Turtle。",
     },
     {
         "id": "rank",
         "title": "技術排名",
-        "body": "排名按 ChartSchool 公開的 SCTR 權重，在每個市場、每個大型或中型族群內部分別計算，標成「技術排名（依SCTR公開方法，非官方）」。不是官方 SCTR。不會用一條全球排名同時填入大型與中型。人數不足時該族群排名不可用。",
+        "body": "排名按 ChartSchool 公開的 SCTR 權重，在每個市場的整份指數名單內計算一次，標成「技術排名（依SCTR公開方法，非官方）」。名單放在既有的 large 排名欄，讓原文的 SCTR.large 條件覆蓋整份宇宙；沒有另設中型市值族群。不是官方 SCTR。人數不足時排名不可用。",
     },
     {
         "id": "ppo",
@@ -70,7 +70,7 @@ ASSUMPTIONS: list[dict[str, str]] = [
     {
         "id": "cohort-config",
         "title": "族群門檻",
-        "body": "宇宙檔已填 large、mid 或 small 時，以檔案為準。檔案空白時用已啟用的市值門檻：美國大型大於 1,000 億美元，中型大於 250 億至 1,000 億美元；日本大型大於 1 兆日圓，中型大於 2,500 億至 1 兆日圓。剛好等於中型下限，或低過該下限，都不算大型或中型。沒有市值不能分層。這組門檻不會改 Squeeze 或 Weak 的市值過濾。",
+        "body": "2026-11-26 起停用市值門檻。宇宙檔寫了 large、mid 或 small 才會排名；空白不會按市值改成大型或中型。公布的指數名單整份寫入同一個排名池。舊門檻（美股 1,000 億／250 億美元，日股 1 兆／2,500 億日圓）不再參與計算。",
     },
     {
         "id": "equality",

@@ -51,31 +51,17 @@ def _policy(policy: str, label: str) -> tuple[str, str | None]:
 def resolve_cohort(security: Security, config: EngineConfig) -> tuple[str | None, str | None, str | None]:
     """Return (cohort, source, reason).
 
-    Metadata cohort wins. Thresholds run only when that market's rule is enabled.
+    Market cap does not assign a cohort. A name is ranked only when the
+    universe file names ``large``, ``mid``, or ``small``. The published index
+    lists put every member in one pool, ``large``, so the existing
+    ``SCTR.large`` clauses rank the whole index. That pool is not a
+    market-cap band.
     """
 
+    del config
     cohort = (security.cohort or "").strip().lower()
     if cohort in COHORTS:
         return cohort, "metadata", None
-    if cohort and cohort not in COHORTS:
+    if cohort:
         return None, None, "invalid_cohort"
-    rule = config.cohort_thresholds.get(security.market)
-    if rule is None or not rule.enabled:
-        if security.market_cap is None:
-            return None, None, "missing_market_cap"
-        return None, None, "cohort_not_configured"
-    if security.market_cap is None:
-        return None, None, "missing_market_cap"
-    if not security.market_cap_currency:
-        return None, None, "missing_market_cap_currency"
-    if security.market_cap_currency != rule.currency:
-        return None, None, "market_cap_currency_mismatch"
-    cap = security.market_cap
-    assert rule.large_min is not None and rule.mid_min is not None and rule.mid_max is not None
-    if cap > rule.large_min:
-        return "large", "config_threshold", None
-    if rule.mid_min < cap <= rule.mid_max:
-        return "mid", "config_threshold", None
-    if rule.small_min is not None and rule.small_min <= cap <= rule.mid_min:
-        return "small", "config_threshold", None
-    return None, "config_threshold", "cap_outside_configured_cohorts"
+    return None, None, "cohort_not_in_list"

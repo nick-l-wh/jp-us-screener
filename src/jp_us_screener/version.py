@@ -1,6 +1,6 @@
 ENGINE_VERSION = "0.1.0"
 SCHEMA_VERSION = "1.0.0"
-SEMANTICS_VERSION = "2026-11-22.provisional.2"
+SEMANTICS_VERSION = "2026-11-26.index.1"
 
 GROUPING_WARNING = "條件分組待核對"
 DEMO_DISCLAIMER = "示範／合成資料，並非實際行情或今日命中"

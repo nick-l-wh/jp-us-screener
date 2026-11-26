@@ -590,7 +590,7 @@ def cap_coverage_note(rows: dict[str, list]) -> str:
     else:
         stale = "沒有沿用較早流通股數。"
     return (
-        "本輪 Yahoo 報價算出市值 "
-        f"{fresh} 檔，當日市值 CSV {from_csv} 檔。其餘用已保存流通股數乘以該交易日收市價。"
-        f"{stale}沒有流通股數 {missing} 檔，不歸入族群，也不會當成 0。"
+        "市值不是宇宙、公布門檻或 Squeeze／Weak 條件。"
+        f"本輪有市值 {fresh + from_csv + cached} 檔（報價 {fresh}、當日 CSV {from_csv}、較早股數乘收市價 {cached}）。"
+        f"{stale}沒有市值 {missing} 檔，留空，不會當成 0，也不會因此拒絕公布。"
     )

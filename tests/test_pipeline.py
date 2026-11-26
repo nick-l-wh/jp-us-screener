@@ -161,13 +161,11 @@ def test_missing_cap_short_history_unknown_and_adr():
     diag = snapshot["universe_diagnostics"]
     assert {row["qualified_symbol"] for row in diag["excluded_unknown_type"]} == {"US:SYN-UNK"}
     assert {row["qualified_symbol"] for row in diag["eligibility_unresolved"]} == {"US:SYN-ADR"}
-    unmet = {row["qualified_symbol"] for row in snapshot["scans"]["adx"]["markets"]["US"]["diagnostics"]["unmet_dependency"]}
     warmup = {row["qualified_symbol"] for row in snapshot["scans"]["adx"]["markets"]["US"]["diagnostics"]["insufficient_warmup"]}
     matches = {row["qualified_symbol"] for row in snapshot["scans"]["adx"]["markets"]["US"]["matches"]}
     reasons = {row["qualified_symbol"]: row["reason"] for row in snapshot["cohort_ranks"]["unranked"]}
-    assert reasons["US:SYN-NOCAP"] == "missing_market_cap"
+    assert reasons["US:SYN-NOCAP"] == "cohort_not_in_list"
     assert "US:SYN-NOCAP" not in matches
-    assert "US:SYN-NOCAP" in unmet or reasons["US:SYN-NOCAP"] == "missing_market_cap"
     assert reasons["US:SYN-SHORT"] == "indicator_score_unavailable"
     assert "US:SYN-SHORT" in warmup
     assert "US:SYN-ADR" not in matches

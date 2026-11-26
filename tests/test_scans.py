@@ -27,17 +27,10 @@ def test_di_clause_uses_rolling_max_not_numeric_25():
 def test_jp_currency_and_strict_thresholds():
     base = scans_by_id()
     feature = _feature(close=500)
-    stock = security(market="JP", currency="JPY", market_cap=100_000_000_000,
-                     market_cap_currency="JPY", market_cap_as_of=feature.date)
+    stock = security(market="JP", currency="JPY", market_cap=None, market_cap_currency="", market_cap_as_of="")
     for scan_id in ("weak", "squeeze"):
-        clause = next(c for c in jp_scan(base[scan_id])["tree"]["children"] if c["op"] == "cap_jpy")
-        stock.market_cap = 100_000_000_000
-        assert evaluate_tree(clause, feature, stock, _large(10)).status == "fail"
-        stock.market_cap += 1
-        assert evaluate_tree(clause, feature, stock, _large(10)).status == "pass"
-        stock.market_cap_as_of = "2024-06-02"
-        assert evaluate_tree(clause, feature, stock, _large(10)).status == "unavailable"
-        stock.market_cap_as_of = feature.date
+        for tree in (base[scan_id]["tree"], jp_scan(base[scan_id])["tree"]):
+            assert all(clause.get("op") not in {"cap_usd", "cap_jpy"} for clause in tree["children"])
     price = next(c for c in jp_scan(base["turtle"])["tree"]["children"] if c.get("id") == "tu-px")
     assert evaluate_tree(price, feature, stock, _large(10)).status == "fail"
     feature.close = 501
@@ -82,8 +75,9 @@ def test_weak_keeps_explicit_brackets_and_rejects_rank_zero():
     assert outcome_of(evaluate_tree(scan["tree"], passing, stock, _large(25), [])) == "no_match"
 
 
-def test_market_cap_boundaries_and_non_usd_is_not_converted():
+def test_squeeze_and_weak_do_not_use_market_cap():
     scan = scans_by_id()["squeeze"]
+    assert "market cap" not in scan["raw_source"].lower()
     base = dict(
         sma20_volume=400_000,
         close=50,
@@ -99,18 +93,17 @@ def test_market_cap_boundaries_and_non_usd_is_not_converted():
         minus_di14=10,
     )
     feature = _feature(**base)
-    exact = security(market_cap=1_000_000_000)
-    above = security(market_cap=1_000_000_001)
-    yen = security(market_cap=10**14, market_cap_currency="JPY")
     ranks = _large(50)
-    assert outcome_of(evaluate_tree(scan["tree"], feature, exact, ranks, [])) == "no_match"
-    assert outcome_of(evaluate_tree(scan["tree"], feature, above, ranks, [])) == "match"
+    missing = security(market_cap=None, market_cap_currency="", market_cap_as_of="")
+    tiny = security(market_cap=1)
+    yen = security(market_cap=1, market_cap_currency="JPY")
+    for stock in (missing, tiny, yen):
+        assert outcome_of(evaluate_tree(scan["tree"], feature, stock, ranks, [])) == "match"
     weak = scans_by_id()["weak"]
+    assert "market cap" not in weak["raw_source"].lower()
     weak_feature = _feature(adx14=10, plus_di14=4, prev25_min_plus_di=6)
-    assert outcome_of(evaluate_tree(weak["tree"], weak_feature, security(market_cap=10_000_000_000), _large(10), [])) == "no_match"
-    assert outcome_of(evaluate_tree(weak["tree"], weak_feature, security(market_cap=10_000_000_001), _large(10), [])) == "match"
-    root = evaluate_tree(scan["tree"], feature, yen, ranks, [])
-    assert outcome_of(root) == "unmet_dependency"
+    assert outcome_of(evaluate_tree(weak["tree"], weak_feature, missing, _large(10), [])) == "match"
+    assert outcome_of(evaluate_tree(weak["tree"], weak_feature, tiny, _large(10), [])) == "match"
 
 
 def test_turtle_windows_and_close_buffer():

@@ -43,7 +43,6 @@ EXCLUDE_NAME_BITS = (
 COMMON_BITS = ("common stock", "common shares", "ordinary shares", "ordinary share")
 US_EXCHANGES = {"N": "XNYS", "A": "XASE", "P": "ARCX", "Z": "BATS", "V": "IEXG"}
 DENSE_SHARE = 0.8
-CAP_SHARE = 0.5
 
 
 @dataclass(frozen=True)
@@ -122,14 +121,6 @@ def coverage_problem(universe: int, usable: int, download_errors: int) -> str | 
         return f"下載失敗 {download_errors}/{universe}，超過兩成"
     if usable / universe < DENSE_SHARE:
         return f"可用行情 {usable}/{universe}，不足八成"
-    return None
-
-
-def caps_problem(market: str, usable: int, with_cap: int) -> str | None:
-    if usable <= 0:
-        return None
-    if with_cap / usable < CAP_SHARE:
-        return f"{market} 有市值的代號 {with_cap}/{usable}，不足一半，拒絕用缺市值的結果覆蓋"
     return None
 
 

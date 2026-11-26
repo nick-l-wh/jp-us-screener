@@ -9,12 +9,14 @@ Hong Kong (UTC+8, no US daylight-saving shift), inside 07:45–08:15. This modul
 does not register a timer. It writes web/public/data only after a real snapshot
 validates. An unchanged session, a holiday carried forward, or any failure
 leaves the previous public files in place. Full price history stays under the
-gitignored data/ directory. Each run sends at most 100 Yahoo HTTP requests
-(charts, quotes, and crumb combined). Cached charts that already cover the
-lookback are reused; a tight budget downloads a rotating page of stale or
-missing symbols and leaves the rest on disk. Every Yahoo request waits 1.5
-seconds. HTTP 429 still backs off and stops the remaining downloads. Saved
-share counts are kept.
+gitignored data/ directory. ``update --prices-dir`` reads local Asia
+Breadth-style CSVs for the Russell 1000 and TOPIX 500 lists and does not call
+Yahoo. The older Yahoo path remains, and still sends at most 100 Yahoo HTTP
+requests (charts, quotes, and crumb combined). Cached charts that already
+cover the lookback are reused; a tight budget downloads a rotating page of
+stale or missing symbols and leaves the rest on disk. Every Yahoo request
+waits 1.5 seconds. HTTP 429 still backs off and stops the remaining downloads.
+Saved share counts are kept. Missing prices are not filled with demo bars.
 """
 
 from __future__ import annotations
@@ -54,13 +56,12 @@ from jp_us_screener.fetchbudget import (
     select_quote_refresh,
     usable_shares,
 )
+from jp_us_screener.indexlists import INDEX_RANK_COHORT, ListError, load_constituents
 from jp_us_screener.io import load_dated_caps, load_ohlcv, load_universe, write_csv
+from jp_us_screener.localprices import bars_from_asia_csv, index_price_files, match_price_file
 from jp_us_screener.marketdata import (
-    caps_problem,
     choose_session,
     coverage_problem,
-    parse_jpx,
-    parse_us_listings,
     resolve_cap,
     session_date,
     shares_from_quote,
@@ -87,9 +88,6 @@ from jp_us_screener.sessions import (
 )
 from jp_us_screener.yahoo import YahooBudgetExceeded, YahooClient
 
-JPX_URL = "https://www.jpx.co.jp/english/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_e.xlsx"
-NASDAQ_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
-OTHER_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
 LOOKBACK_DAYS = 800
 
 
@@ -110,6 +108,7 @@ class LoadedSymbol:
     shares_source: str = ""
     shares_currency: str = ""
     dated_caps: dict[str, float] = field(default_factory=dict)
+    bars: list[Bar] | None = None
 
 
 @dataclass
@@ -153,7 +152,17 @@ def assemble(loaded: LoadedMarkets, expected: dict[str, date], config: EngineCon
         transformed: list[tuple[LoadedSymbol, list[Bar]]] = []
         errors = 0
         for item in symbols:
-            if item.error or item.payload is None:
+            if item.error:
+                errors += 1
+                continue
+            if item.bars is not None:
+                if not item.bars:
+                    errors += 1
+                    item.error = "沒有可用行情"
+                    continue
+                transformed.append((item, item.bars))
+                continue
+            if item.payload is None:
                 errors += 1
                 continue
             bars, info = transform_chart(
@@ -216,10 +225,6 @@ def assemble(loaded: LoadedMarkets, expected: dict[str, date], config: EngineCon
         problem = coverage_problem(universe, len(priced), errors)
         if problem:
             problems.append(f"{market} {problem}")
-        with_cap = sum(1 for row in priced if row.market_cap is not None)
-        cap_gap = caps_problem(market, len(priced), with_cap)
-        if cap_gap:
-            problems.append(cap_gap)
         rows[market] = priced
     return Assembled(rows=rows, choices=choices, problems=problems, notes=dict(loaded.notes))
 
@@ -302,8 +307,8 @@ def _run_update(
     _write_inputs(work, assembled.rows)
     bars = load_ohlcv(work / "ohlcv.csv")
     securities = load_universe(work / "universe.csv", work / "marketcap.csv")
-    if any(security.cohort for security in securities):
-        print("failed: 宇宙檔寫入了 cohort，市值門檻沒有生效", file=sys.stderr)
+    if any(security.cohort != INDEX_RANK_COHORT for security in securities):
+        print("failed: 指數名單必須整份放在同一個排名池，不能按市值再分層", file=sys.stderr)
         return 1
     baseline = previous if previous and previous.get("mode") == "real" else None
     snapshot = compute_snapshot(
@@ -371,7 +376,7 @@ def _write_inputs(work: Path, rows: dict[str, list[PricedSymbol]]) -> None:
                     "listing_segment": "primary",
                     "exchange": item.exchange,
                     "currency": item.currency,
-                    "cohort": "",
+                    "cohort": INDEX_RANK_COHORT,
                     "market_cap": cap,
                     "market_cap_currency": item.market_cap_currency,
                     "market_cap_as_of": item.market_cap_as_of,
@@ -426,11 +431,12 @@ def _num(value: float) -> str:
 
 def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
     client = YahooClient(cooldown_path=cache_dir / "yahoo-cooldown.json")
-    nasdaq = client.request_public(NASDAQ_LISTED_URL).decode("utf-8", "replace")
-    other = client.request_public(OTHER_LISTED_URL).decode("utf-8", "replace")
-    us_rows, us_info = parse_us_listings(nasdaq, other)
-    jpx = client.request_public(JPX_URL)
-    jp_rows, jp_info = parse_jpx(jpx)
+    try:
+        us_rows, jp_rows, info = load_constituents()
+    except ListError as exc:
+        raise UpdateError(str(exc)) from exc
+    us_info = info["US"]
+    jp_info = info["JP"]
     if not us_rows or not jp_rows:
         raise UpdateError("美股或日股名單是空的，保留原快照")
     symbols = {
@@ -518,21 +524,74 @@ def fetch_markets(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
             f"刷新名單 {quote_stats['refresh']}，停止={quote_stats['stopped']}"
         ),
     ]
-    notes = {
-        "US": (
-            f"美股名單來自 Nasdaq Trader nasdaqlisted.txt 與 otherlisted.txt"
-            f"（{us_info['nasdaq_footer']} / {us_info['other_footer']}）。"
-            f"收錄名稱列明普通股的 {us_info['rows']} 檔，已排除 ETF、權證、優先股和存託憑證。"
-            "不是完整美股市場。ADR 與 OTC 未決議，沒有猜進名單。"
-        ),
-        "JP": (
-            "日股名單來自 JPX 英文 data_e.xlsx 的 TOPIX Core30、Large70、Mid400 國內股，"
-            f"共 {jp_info['rows']} 檔，有效日 {jp_info['effective_dates']}。"
-            "指數名稱只用來定名單，不用作族群；族群按市值門檻。不是完整日股市場。"
-        ),
-    }
+    notes = _index_notes(us_info, jp_info, local_prices=False)
     print(f"名單 美國 {len(symbols['US'])} 日本 {len(symbols['JP'])}", flush=True)
     return LoadedMarkets(symbols=symbols, notes=notes, stats={"lines": lines})
+
+
+def load_local_markets(
+    expected: dict[str, date],
+    prices_dir: Path,
+    members: tuple[list[dict], list[dict], dict] | None = None,
+) -> LoadedMarkets:
+    """Map a local prices directory onto the index lists. Does not call Yahoo."""
+
+    try:
+        us_rows, jp_rows, info = members if members is not None else load_constituents()
+    except ListError as exc:
+        raise UpdateError(str(exc)) from exc
+    if not us_rows or not jp_rows:
+        raise UpdateError("美股或日股名單是空的，保留原快照")
+    try:
+        files = index_price_files(prices_dir)
+    except FileNotFoundError as exc:
+        raise UpdateError(str(exc)) from exc
+    config = EngineConfig()
+    symbols: dict[str, list[LoadedSymbol]] = {"US": [], "JP": []}
+    for row in [*us_rows, *jp_rows]:
+        item = _loaded(row)
+        market = item.market
+        path, error = match_price_file(files, market, item.symbol)
+        if error or path is None:
+            item.error = error or "沒有價格檔"
+            symbols[market].append(item)
+            continue
+        lookback = expected[market] - timedelta(days=LOOKBACK_DAYS)
+        bars, bar_error = bars_from_asia_csv(
+            path,
+            market,
+            item.symbol,
+            through=expected[market],
+            lookback_start=lookback,
+            config=config,
+        )
+        if bar_error or not bars:
+            item.error = bar_error or "沒有可用行情"
+        else:
+            item.bars = bars
+        symbols[market].append(item)
+    notes = _index_notes(info["US"], info["JP"], local_prices=True)
+    print(f"本機價格 美國 {len(symbols['US'])} 日本 {len(symbols['JP'])} 目錄 {prices_dir}", flush=True)
+    return LoadedMarkets(symbols=symbols, notes=notes, stats={"lines": [notes["US"], notes["JP"]]})
+
+
+def _index_notes(us_info: dict, jp_info: dict, *, local_prices: bool) -> dict[str, str]:
+    series = jp_info.get("series") or {}
+    series_text = "、".join(f"{name} {series[name]}" for name in ("TOPIX Core30", "TOPIX Large70", "TOPIX Mid400") if name in series)
+    price_source = "價格來自本機 CSV，沒有呼叫 Yahoo crumb 或報價。" if local_prices else "價格仍可由舊的 Yahoo 日線路徑下載；這不是本機 CSV 路徑。"
+    return {
+        "US": (
+            f"美股名單是 Russell 1000，持股日 {us_info.get('as_of', '')}，權益證券 {us_info.get('rows')} 檔。"
+            "這是 iShares IWB 持股代理，不是富時羅素官方名單，也不是市值分層。"
+            f"{price_source}"
+        ),
+        "JP": (
+            f"日股名單是 TOPIX 500，生效 {jp_info.get('as_of', '')}，共 {jp_info.get('rows')} 檔"
+            + (f"（{series_text}）" if series_text else "")
+            + "。系列名稱是指數成分，不是市值族群。"
+            f"{price_source}"
+        ),
+    }
 
 
 def _loaded(row: dict) -> LoadedSymbol:
@@ -887,27 +946,38 @@ def _attach_shares(symbols: dict[str, list[LoadedSymbol]], records: dict[str, di
             item.shares_currency = str(record.get("currency") or "")
 
 
-def _run_check(now: datetime, cache_dir: Path) -> int:
+def _run_check(now: datetime, cache_dir: Path, prices_dir: Path | None = None) -> int:
     cut = session_cut(now)
     expected = expected_sessions(cut)
     print(
         f"檢查 {ROUTINE_ID} 香港切點 {cut.isoformat()} 預期美國 {expected['US'].isoformat()} 日本 {expected['JP'].isoformat()}",
         flush=True,
     )
-    client = YahooClient(cooldown_path=cache_dir / "yahoo-cooldown.json")
-    config = EngineConfig()
     try:
-        nasdaq = client.request_public(NASDAQ_LISTED_URL).decode("utf-8", "replace")
-        other = client.request_public(OTHER_LISTED_URL).decode("utf-8", "replace")
-        us_rows, _info = parse_us_listings(nasdaq, other)
-        jp_rows, _jp_info = parse_jpx(client.request_public(JPX_URL))
-    except Exception as exc:  # noqa: BLE001
-        print(f"failed: 名單下載失敗：{exc}", file=sys.stderr)
+        us_rows, jp_rows, _info = load_constituents()
+    except ListError as exc:
+        print(f"failed: 指數名單讀不到：{exc}", file=sys.stderr)
         return 1
     if not us_rows or not jp_rows:
         print("failed: 名單是空的", file=sys.stderr)
         return 1
     print(f"名單 美國 {len(us_rows)} 日本 {len(jp_rows)}", flush=True)
+    if prices_dir is not None:
+        try:
+            loaded = load_local_markets(expected, prices_dir, members=(us_rows, jp_rows, _info))
+        except UpdateError as exc:
+            print(f"failed: {exc}", file=sys.stderr)
+            return 1
+        for market in ("US", "JP"):
+            usable = sum(1 for item in loaded.symbols[market] if item.bars)
+            print(f"本機價格 {market} {usable}/{len(loaded.symbols[market])}", flush=True)
+            if usable <= 0:
+                print(f"failed: {market} 沒有可讀的本機價格檔", file=sys.stderr)
+                return 1
+        print("check-ok")
+        return 0
+    client = YahooClient(cooldown_path=cache_dir / "yahoo-cooldown.json")
+    config = EngineConfig()
     cap_path = cache_dir / "marketcap.csv"
     dated_caps = load_dated_caps(cap_path) if cap_path.exists() else {}
     records = load_share_records([COMMITTED_SHARES, cache_dir / "shares-outstanding.json"])
@@ -960,8 +1030,21 @@ def _run_check(now: datetime, cache_dir: Path) -> int:
 
 def main_update(args) -> int:
     now = datetime.now(timezone.utc)
+    prices = Path(args.prices_dir) if getattr(args, "prices_dir", "") else None
     if args.check:
-        return _run_check(now, Path(args.cache_dir))
+        return _run_check(now, Path(args.cache_dir), prices)
+    if prices is not None:
+        def load(expected: dict[str, date], cache_dir: Path) -> LoadedMarkets:
+            del cache_dir
+            return load_local_markets(expected, prices)
+
+        return run_update(
+            public_dir=Path(args.public_dir),
+            config_path=Path(args.config),
+            cache_dir=Path(args.cache_dir),
+            now=now,
+            load=load,
+        )
     return run_update(
         public_dir=Path(args.public_dir),
         config_path=Path(args.config),

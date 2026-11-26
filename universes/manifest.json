@@ -1,0 +1,22 @@
+{
+  "decision": "2026-11-26",
+  "US": {
+    "id": "russell1000",
+    "name": "Russell 1000",
+    "as_of": "2026-11-24",
+    "file": "russell1000/iwb-holdings-2026-11-24.csv",
+    "source": "iShares Russell 1000 ETF (IWB) holdings",
+    "source_url": "https://www.ishares.com/us/products/239707/ishares-russell-1000-etf",
+    "note": "ETF holdings proxy, not the FTSE Russell official membership file. Equity rows only. Not filtered by market cap. To update, replace the CSV and set file and as_of here. The parser expects the iShares holdings layout (preamble, then a Ticker header)."
+  },
+  "JP": {
+    "id": "topix500",
+    "name": "TOPIX 500",
+    "as_of": "2026-10-30",
+    "file": "topix500/topix500-2026-10-30.csv",
+    "size_column": "size_new_20261030",
+    "source": "JPX New Index Series review, column 新（2026年10月30日適用）",
+    "source_url": "https://www.jpx.co.jp/markets/indices/topix/tvdivq00000030ne-att/mei2_12_size.pdf",
+    "note": "TOPIX Core30 + Large70 + Mid400. The official count is 501, not 500. Series labels are index membership, not market-cap cohorts. To update, replace the CSV, set file, as_of, and size_column. Required columns are code, name, and the size column named here."
+  }
+}

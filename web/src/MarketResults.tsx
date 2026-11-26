@@ -96,6 +96,7 @@ export function MarketResults({ market, scanId, history, choice, onChoose, onImp
               <div className="screen-info">
                 <p>You have used <strong>{used}</strong> of your <strong>6</strong> scans</p>
                 <p className="screen-source">資料日期：{date ?? "—"} ｜ {sourceNote(day, snapshotId)}</p>
+                <p className="screen-source" data-testid="universe-rule">宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。Squeeze 與 Weak ADX 不再使用市值條件。已公布的 2026-11-20 快照維持原樣，要等下一次用本機價格通過檢查才會更新。</p>
               </div>
               <Coverage note={day?.notice} />
               <div className="screen-table-wrap">
@@ -147,17 +148,19 @@ function sourceNote(day: TradingDay | null, snapshotId?: string): string {
 }
 
 function marketRule(id: string, market: MarketCode): string {
-  if (id === "squeeze") return market === "JP" ? "條件同時成立；市值 > 1,000 億日圓" : "條件同時成立；市值 > 10 億美元";
+  if (id === "squeeze") return "條件同時成立；沒有市值條件";
   if (id === "turtle") return market === "JP" ? "條件同時成立；收市 > 500 日圓" : "條件同時成立；收市 > 5 美元";
-  if (id === "weak") return market === "JP" ? "大型或中型（括號）＋市值 > 1,000 億日圓" : "大型或中型（括號）＋市值 > 100 億美元";
+  if (id === "weak") return "指數名單內的排名條件，再加其餘條件；沒有市值條件";
   return SCAN_ROUTES.find(scan => scan.id === id)?.rule ?? "";
 }
 
 function Coverage({ note }: { note?: string }): ReactNode {
   if (!note) return null;
+  const historical = note.includes("按市值劃分");
   return (
     <details className="screen-caveat">
       <summary>覆蓋範圍與限制</summary>
+      {historical && <p className="screen-source">這段是 2026-11-20 快照當時的說明，不是現在的宇宙規則。現行宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。</p>}
       <p className="publication-note" data-testid="publication-note">{note}</p>
     </details>
   );
