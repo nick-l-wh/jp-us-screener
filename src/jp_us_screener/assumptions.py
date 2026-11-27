@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import copy
+
 from jp_us_screener.sctr import RANK_METHOD
-from jp_us_screener.scans import clause_labels, scan_catalog
+from jp_us_screener.scans import clause_labels, jp_scan, scan_catalog
 from jp_us_screener.version import ENGINE_VERSION, SCHEMA_VERSION, SEMANTICS_VERSION
 
 ASSUMPTIONS: list[dict[str, str]] = [
@@ -95,6 +97,9 @@ def export_rules() -> dict:
     for scan in scan_catalog():
         public = {key: value for key, value in scan.items() if key != "tree"}
         public["clauses"] = clause_labels(scan["tree"])
+        # The page renders these trees. They are the same nodes the engine evaluates.
+        public["tree"] = copy.deepcopy(scan["tree"])
+        public["jp_tree"] = copy.deepcopy(jp_scan(scan)["tree"])
         scans.append(public)
     return {
         "schema_version": SCHEMA_VERSION,

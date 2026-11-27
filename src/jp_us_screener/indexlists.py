@@ -59,6 +59,33 @@ def load_manifest(root: Path | None = None) -> tuple[Path, dict]:
     return directory, payload
 
 
+def export_public_universe(root: Path | None = None) -> dict:
+    """Membership the page can diff against a snapshot. Symbols stay in file order."""
+
+    directory, manifest = load_manifest(root)
+    us_rows, jp_rows, info = load_constituents(directory)
+
+    def pack(market: str, rows: list[dict], spec: dict) -> dict:
+        payload = {
+            "id": spec.get("id") or "",
+            "name": spec.get("name") or info[market].get("index_name") or market,
+            "as_of": str(spec.get("as_of") or info[market].get("as_of") or ""),
+            "rows": int(info[market]["rows"]),
+            "source": spec.get("source") or "",
+            "note": spec.get("note") or "",
+            "symbols": [row["symbol"] for row in rows],
+        }
+        if market == "JP":
+            payload["series"] = info["JP"].get("series") or {}
+        return payload
+
+    return {
+        "decision": manifest.get("decision"),
+        "US": pack("US", us_rows, manifest["US"]),
+        "JP": pack("JP", jp_rows, manifest["JP"]),
+    }
+
+
 def load_constituents(root: Path | None = None) -> tuple[list[dict], list[dict], dict]:
     """Return ``(us_rows, jp_rows, info)`` for the lists named in the manifest."""
 
