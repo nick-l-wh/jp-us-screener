@@ -1,7 +1,9 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
+import { MarketResults } from "./MarketResults";
 import universeJson from "../public/data/universe.json";
 import ingestJson from "../public/data/ingest-diagnostics.json";
-import rulesJson from "../public/rules.json";
 import {
   buildCoverageNote,
   expectedWeekdaySession,
@@ -11,11 +13,10 @@ import {
   type IngestDiagnostics,
   type PublicUniverse,
 } from "./coverageNote";
-import { buildCriteria, isRulesFile, orderForCurrent } from "./scanCriteria";
+import { buildCriteria, CRITERIA_HEADING, CRITERIA_INTRO } from "./scanCriteria";
 
 const universe: unknown = universeJson;
 const ingest: unknown = ingestJson;
-const rules: unknown = rulesJson;
 
 function requireUniverse(): PublicUniverse {
   if (!isPublicUniverse(universe)) throw new Error("universe.json 不是指數名單");
@@ -96,37 +97,141 @@ describe("coverage note", () => {
   });
 });
 
+const OFFICIAL = {
+  adx: {
+    title: "ADX",
+    text: [
+      "大型族群技術排名 > 0 或 中型族群技術排名 > 0；且 90 日 ROC > 20；",
+      "且 今日 +DI(14) > 不含今日的前 25 根 +DI(14) 最高值；",
+      "且 類型為股票；且 成交量（股數）> 100000；",
+      "且 所屬族群技術排名 > 70。",
+    ].join("\n"),
+  },
+  pullback: {
+    title: "Pullback回調",
+    text: [
+      "大型族群技術排名 > 70 或 中型族群技術排名 > 70；且 20 日 ROC > 20；",
+      "且 +DI(14) > 30；且 類型為股票。",
+      "依 Daily ULCER(10) 由大至小排序。Daily ULCER(10) 是排序不是過濾。",
+    ].join("\n"),
+  },
+  squeeze: {
+    title: "Squeeze On擠壓開啟",
+    text: [
+      "類型為股票；",
+      "美股：國家為美國；日股：日本股票；",
+      "20 日平均成交量（股數）> 300000；",
+      "收市 > SMA(200)；SMA(200) > 20 根之前的 SMA(200)；",
+      "Keltner 上軌 > 布林上軌；Keltner 下軌 < 布林下軌；",
+      "布林寬度等於含今日的 63 根最小值；",
+      "+DI(14) < 20；-DI(14) < 20。",
+    ].join("\n"),
+  },
+  turtle: {
+    title: "Turtle Soup Plus One - buy海龜湯加一（買入）",
+    text: [
+      "類型為股票；",
+      "美股：國家為美國；日股：日本股票；",
+      "20 日平均成交量（股數）> 500000；",
+      "group 不是 ETF；",
+      "美股：收市 > 5（美元；不換算成日圓）；日股：收市 > 500 日圓；",
+      "今日低位等於含今日的 20 根最低值；",
+      "3 至 10 根前任一低位等於昨日的 20 根最低值；",
+      "收市 <= 昨日 20 根最低值 × 1.005。",
+    ].join("\n"),
+  },
+  weak: {
+    title: "Weak ADX弱 ADX",
+    text: [
+      "類型為股票；成交量（股數）> 100000；",
+      "（大型族群技術排名 > 0 或 中型族群技術排名 > 0）；",
+      "所屬族群技術排名 < 20；",
+      "ADX(14) < 20；今日 +DI(14) < 不含今日的前 25 根 +DI(14) 最低值。",
+    ].join("\n"),
+  },
+  young: {
+    title: "Young Trend初生趨勢",
+    text: [
+      "大型族群技術排名 > 50 或 中型族群技術排名 > 50；",
+      "且 3 日 ROC > 9；且 SMA(3,成交量) > SMA(50,成交量) × 1.5。依 ROC(3) 由大至小排序。",
+      "ROC(3) 是排序不是過濾。預設較大值在前。",
+    ].join("\n"),
+  },
+} as const;
+
 describe("scan criteria", () => {
-  test("renders the engine clause labels for every scan", () => {
-    if (!isRulesFile(rules)) throw new Error("rules.json 不是規則檔");
-    const view = buildCriteria(rules, "adx");
+  test("uses the official wording once, in scan order, on an unfiltered view", () => {
+    const view = buildCriteria(null);
+    expect(CRITERIA_HEADING).toBe("掃描條件");
+    expect(view.intro).toBe(CRITERIA_INTRO);
+    expect(view.intro).toBe("排名按 ChartSchool 公開的 SCTR 權重，在每個市場的整份指數名單內計算一次，標成「技術排名（依SCTR公開方法，非官方）」。");
     expect(view.scans.map((scan) => scan.id)).toEqual(["adx", "pullback", "squeeze", "turtle", "weak", "young"]);
-    expect(view.intro.join("\n")).toContain("SCTR.large");
-    expect(view.intro.join("\n")).toContain("同一個排名池");
-    const text = Object.fromEntries(view.scans.map((scan) => [scan.id, scan.text]));
-    expect(text.adx).toBe("大型族群技術排名 > 0 或 中型族群技術排名 > 0；且 90 日 ROC > 20；且 今日 +DI(14) > 不含今日的前 25 根 +DI(14) 最高值；且 類型為股票；且 成交量（股數）> 100000；且 所屬族群技術排名 > 70。");
-    expect(view.scans[0].warning).toBe("條件分組待核對");
-    expect(text.pullback).toContain("大型族群技術排名 > 70 或 中型族群技術排名 > 70；且 20 日 ROC > 20；且 +DI(14) > 30；且 類型為股票。");
-    expect(text.pullback).toContain("依 Daily ULCER(10) 由大至小排序。");
-    expect(text.pullback).toContain("方向未經來源核對。");
-    expect(text.squeeze).toContain("類型為股票；美股：國家為美國；日股：日本股票；20 日平均成交量（股數）> 300000；");
-    expect(text.squeeze).toContain("布林寬度等於含今日的 63 根最小值；+DI(14) < 20；-DI(14) < 20。沒有市值條件。");
-    expect(text.turtle).toContain("美股：收市 > 5（美元；不換算成日圓）；日股：收市 > 500 日圓");
-    expect(text.turtle).toContain("收市 <= 昨日 20 根最低值 × 1.005。");
-    expect(text.turtle).toContain("20 日平均成交量（股數）> 500000");
-    expect(text.weak).toContain("（大型族群技術排名 > 0 或 中型族群技術排名 > 0）");
-    expect(text.weak).toContain("所屬族群技術排名 < 20；ADX(14) < 20；今日 +DI(14) < 不含今日的前 25 根 +DI(14) 最低值。沒有市值條件。");
-    expect(text.young).toContain("大型族群技術排名 > 50 或 中型族群技術排名 > 50；且 3 日 ROC > 9；且 SMA(3,成交量) > SMA(50,成交量) × 1.5。");
-    expect(text.young).toContain("依 ROC(3) 由大至小排序。");
-    expect(text.young).toContain("Young Trend 原文沒有類型條款，股票限定是本引擎的宇宙政策。");
-    expect(text.young).not.toContain("類型為股票");
     for (const scan of view.scans) {
-      expect(scan.text).not.toContain("市值 >");
-      expect(scan.text).not.toContain("1,000");
-      expect(scan.text).not.toContain("10,000");
+      const official = OFFICIAL[scan.id as keyof typeof OFFICIAL];
+      expect(scan.title).toBe(official.title);
+      expect(scan.text).toBe(official.text);
+      expect(scan.text).not.toContain("條件分組待核對");
+      expect(scan.text).not.toContain("沒有市值條件");
     }
-    const pulled = orderForCurrent(view.scans, "pullback");
-    expect(pulled[0].id).toBe("pullback");
-    expect(pulled).toHaveLength(6);
+    expect(view.intro).not.toContain("條件分組待核對");
+    expect(view.intro).not.toContain("沒有市值條件");
+  });
+
+  test("a single-scan page renders only that scan", () => {
+    for (const id of Object.keys(OFFICIAL) as (keyof typeof OFFICIAL)[]) {
+      const view = buildCriteria(id);
+      expect(view.scans).toHaveLength(1);
+      expect(view.scans[0].id).toBe(id);
+      expect(view.scans[0].title).toBe(OFFICIAL[id].title);
+      expect(view.scans[0].text).toBe(OFFICIAL[id].text);
+      expect(view.intro).toBe(CRITERIA_INTRO);
+    }
+    const pullback = buildCriteria("pullback");
+    expect(pullback.scans.map((scan) => scan.id)).toEqual(["pullback"]);
+    expect(pullback.scans[0].text).not.toContain("90 日 ROC");
+    expect(pullback.scans[0].text).not.toContain("Young Trend");
+    expect(buildCriteria("not-a-scan").scans).toHaveLength(6);
+  });
+
+  test("the scan page markup lists only the filtered scan", () => {
+    const adx = renderToStaticMarkup(createElement(MarketResults, {
+      market: "US",
+      scanId: "adx",
+      history: {},
+      onChoose: () => undefined,
+      onImport: () => undefined,
+      error: null,
+    }));
+    expect(adx).toContain("覆蓋範圍與限制");
+    expect(adx).toContain("掃描條件");
+    expect(adx).toContain(CRITERIA_INTRO);
+    expect(adx).toContain('data-testid="criteria-adx"');
+    expect(adx).toContain(">ADX</h4>");
+    expect(adx).not.toContain('data-testid="criteria-pullback"');
+    expect(adx).not.toContain('data-testid="criteria-squeeze"');
+    expect(adx).not.toContain('data-testid="criteria-turtle"');
+    expect(adx).not.toContain('data-testid="criteria-weak"');
+    expect(adx).not.toContain('data-testid="criteria-young"');
+    expect(adx).not.toContain("is-current");
+    expect(adx).not.toContain("條件分組待核對");
+    expect(adx).not.toContain("沒有市值條件");
+    expect(adx.match(/data-testid="criteria-/g)).toHaveLength(1);
+
+    const all = renderToStaticMarkup(createElement(MarketResults, {
+      market: "US",
+      scanId: null,
+      history: {},
+      onChoose: () => undefined,
+      onImport: () => undefined,
+      error: null,
+    }));
+    expect([...all.matchAll(/data-testid="criteria-([^"]+)"/g)].map((match) => match[1])).toEqual([
+      "adx", "pullback", "squeeze", "turtle", "weak", "young",
+    ]);
+    expect(all).toContain("Pullback回調");
+    expect(all).toContain("Squeeze On擠壓開啟");
+    expect(all).toContain("Turtle Soup Plus One - buy海龜湯加一（買入）");
+    expect(all).toContain("Weak ADX弱 ADX");
+    expect(all).toContain("Young Trend初生趨勢");
   });
 });
