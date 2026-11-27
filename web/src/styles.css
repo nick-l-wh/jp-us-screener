@@ -241,7 +241,7 @@ body:has(.screen-shell) {
 .screen-caveat .publication-note { margin-top: 8px; }
 .screen-caveat .publication-note p { margin: 0; }
 .screen-caveat .publication-note p + p { margin-top: 8px; }
-.screen-criteria { display: grid; gap: 8px; margin-top: 10px; }
+.screen-criteria { display: grid; gap: 8px; margin: 16px 18px 0; }
 .screen-criteria h3 { margin: 0; font-size: 15px; color: #1c2b3a; }
 .screen-criteria .criteria-intro { margin: 0; color: #3d4f63; font-size: 13px; line-height: 1.55; }
 .screen-criteria article { padding: 8px 10px; border-radius: 8px; }

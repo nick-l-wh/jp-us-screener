@@ -104,7 +104,7 @@ export function MarketResults({ market, scanId, history, choice, onChoose, onImp
                 <p className="screen-source">資料日期：{date ?? "—"} ｜ {sourceNote(day, snapshotId)}</p>
                 <p className="screen-source" data-testid="universe-rule">宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。Squeeze 與 Weak ADX 不再使用市值條件。已公布快照是美國 2026-11-25、日本 2026-11-26。</p>
               </div>
-              <Coverage note={day?.notice} snapshot={snapshot} universe={universe} ingest={ingest} market={market} scanId={null} date={date} demo={day?.demo} />
+              <Coverage note={day?.notice} snapshot={snapshot} universe={universe} ingest={ingest} market={market} date={date} demo={day?.demo} />
               <div className="screen-table-wrap">
                 <table className="screen-table" aria-label="Your Scans">
                   <thead>
@@ -136,7 +136,7 @@ export function MarketResults({ market, scanId, history, choice, onChoose, onImp
             </>
           ) : (
             <div className="screen-results">
-              <Coverage note={day?.notice} snapshot={snapshot} universe={universe} ingest={ingest} market={market} scanId={meta.id} date={date} demo={day?.demo} />
+              <ScanCriteriaSection scanId={meta.id} />
               <ScanResults key={market + meta.id + selected?.key} scanId={meta.id} market={market} day={day} date={date} />
             </div>
           )}
@@ -160,13 +160,12 @@ function marketRule(id: string, market: MarketCode): string {
   return SCAN_ROUTES.find(scan => scan.id === id)?.rule ?? "";
 }
 
-function Coverage({ note, snapshot, universe, ingest, market, scanId, date, demo }: {
+function Coverage({ note, snapshot, universe, ingest, market, date, demo }: {
   note?: string;
   snapshot?: Snapshot | null;
   universe?: PublicUniverse | null;
   ingest?: IngestDiagnostics | null;
   market: MarketCode;
-  scanId: string | null;
   date: string | null;
   demo?: boolean;
 }): ReactNode {
@@ -174,8 +173,7 @@ function Coverage({ note, snapshot, universe, ingest, market, scanId, date, demo
     ? buildCoverageNote(coverageFromSnapshot(snapshot), universe ?? null, ingest ?? null)
     : null;
   const shown = generated ?? note ?? "";
-  const criteria = buildCriteria(scanId);
-  if (!shown && criteria.scans.length === 0) return null;
+  if (!shown) return null;
   const historical = !generated && shown.includes("按市值劃分");
   const paragraphs = shown.split(/\n\n+/).filter((paragraph) => paragraph.length > 0);
   return (
@@ -187,16 +185,22 @@ function Coverage({ note, snapshot, universe, ingest, market, scanId, date, demo
           {paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
         </div>
       )}
-      <div className="screen-criteria" data-testid="scan-criteria" data-scan-count={criteria.scans.length}>
-        <h3>{CRITERIA_HEADING}</h3>
-        <p className="criteria-intro">{criteria.intro}</p>
-        {criteria.scans.map((scan) => (
-          <article key={scan.id} data-testid={`criteria-${scan.id}`}>
-            <h4>{scan.title}</h4>
-            <p>{scan.text}</p>
-          </article>
-        ))}
-      </div>
     </details>
+  );
+}
+
+function ScanCriteriaSection({ scanId }: { scanId: string }): ReactNode {
+  const criteria = buildCriteria(scanId);
+  return (
+    <section className="screen-criteria" data-testid="scan-criteria" data-scan-count={criteria.scans.length} aria-label={CRITERIA_HEADING}>
+      <h3>{CRITERIA_HEADING}</h3>
+      <p className="criteria-intro">{criteria.intro}</p>
+      {criteria.scans.map((scan) => (
+        <article key={scan.id} data-testid={`criteria-${scan.id}`}>
+          <h4>{scan.title}</h4>
+          <p>{scan.text}</p>
+        </article>
+      ))}
+    </section>
   );
 }
