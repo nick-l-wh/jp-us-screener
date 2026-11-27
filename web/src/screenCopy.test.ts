@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
+import type { TradingDay } from "./history";
 import { MarketResults } from "./MarketResults";
 import universeJson from "../public/data/universe.json";
 import ingestJson from "../public/data/ingest-diagnostics.json";
@@ -159,8 +160,33 @@ const OFFICIAL = {
   },
 } as const;
 
+const COVERAGE_NOTICE = "美國數據日期 2026-11-25。這是覆蓋說明，不應出現在單一掃描結果頁。";
+
+function notedHistory(): Record<string, TradingDay> {
+  const day: TradingDay = {
+    key: "US:2026-11-25",
+    market: "US",
+    date: "2026-11-25",
+    demo: false,
+    notice: COVERAGE_NOTICE,
+    scans: {},
+  };
+  return { [day.key]: day };
+}
+
+function renderPage(scanId: string | null, history: Record<string, TradingDay> = {}) {
+  return renderToStaticMarkup(createElement(MarketResults, {
+    market: "US",
+    scanId,
+    history,
+    onChoose: () => undefined,
+    onImport: () => undefined,
+    error: null,
+  }));
+}
+
 describe("scan criteria", () => {
-  test("uses the official wording once, in scan order, on an unfiltered view", () => {
+  test("keeps the official wording for every scan", () => {
     const view = buildCriteria(null);
     expect(CRITERIA_HEADING).toBe("掃描條件");
     expect(view.intro).toBe(CRITERIA_INTRO);
@@ -193,45 +219,36 @@ describe("scan criteria", () => {
     expect(buildCriteria("not-a-scan").scans).toHaveLength(6);
   });
 
-  test("the scan page markup lists only the filtered scan", () => {
-    const adx = renderToStaticMarkup(createElement(MarketResults, {
-      market: "US",
-      scanId: "adx",
-      history: {},
-      onChoose: () => undefined,
-      onImport: () => undefined,
-      error: null,
-    }));
-    expect(adx).toContain("覆蓋範圍與限制");
-    expect(adx).toContain("掃描條件");
-    expect(adx).toContain(CRITERIA_INTRO);
-    expect(adx).toContain('data-testid="criteria-adx"');
-    expect(adx).toContain(">ADX</h4>");
-    expect(adx).not.toContain('data-testid="criteria-pullback"');
-    expect(adx).not.toContain('data-testid="criteria-squeeze"');
-    expect(adx).not.toContain('data-testid="criteria-turtle"');
-    expect(adx).not.toContain('data-testid="criteria-weak"');
-    expect(adx).not.toContain('data-testid="criteria-young"');
-    expect(adx).not.toContain("is-current");
-    expect(adx).not.toContain("條件分組待核對");
-    expect(adx).not.toContain("沒有市值條件");
-    expect(adx.match(/data-testid="criteria-/g)).toHaveLength(1);
+  test("Your Scans shows the coverage note and no criteria", () => {
+    const page = renderPage(null, notedHistory());
+    expect(page).toContain("覆蓋範圍與限制");
+    expect(page).toContain(COVERAGE_NOTICE);
+    expect(page).toContain('data-testid="publication-note"');
+    expect(page).not.toContain("掃描條件");
+    expect(page).not.toContain(CRITERIA_INTRO);
+    expect(page).not.toContain('data-testid="scan-criteria"');
+    expect(page).not.toContain('data-testid="criteria-');
+  });
 
-    const all = renderToStaticMarkup(createElement(MarketResults, {
-      market: "US",
-      scanId: null,
-      history: {},
-      onChoose: () => undefined,
-      onImport: () => undefined,
-      error: null,
-    }));
-    expect([...all.matchAll(/data-testid="criteria-([^"]+)"/g)].map((match) => match[1])).toEqual([
-      "adx", "pullback", "squeeze", "turtle", "weak", "young",
-    ]);
-    expect(all).toContain("Pullback回調");
-    expect(all).toContain("Squeeze On擠壓開啟");
-    expect(all).toContain("Turtle Soup Plus One - buy海龜湯加一（買入）");
-    expect(all).toContain("Weak ADX弱 ADX");
-    expect(all).toContain("Young Trend初生趨勢");
+  test("a single-scan page shows only that scan and no coverage", () => {
+    for (const id of ["adx", "turtle"] as const) {
+      const page = renderPage(id, notedHistory());
+      expect(page).not.toContain("覆蓋範圍與限制");
+      expect(page).not.toContain(COVERAGE_NOTICE);
+      expect(page).not.toContain('data-testid="publication-note"');
+      expect(page).toContain("掃描條件");
+      expect(page).toContain(CRITERIA_INTRO);
+      expect(page).toContain(`data-testid="criteria-${id}"`);
+      expect(page).toContain(`>${OFFICIAL[id].title}</h4>`);
+      expect(page.match(/data-testid="criteria-/g)).toHaveLength(1);
+      for (const other of Object.keys(OFFICIAL)) {
+        if (other !== id) expect(page).not.toContain(`data-testid="criteria-${other}"`);
+      }
+    }
+    const turtle = renderPage("turtle", notedHistory());
+    expect(turtle).toContain("group 不是 ETF");
+    expect(turtle).toContain("1.005");
+    expect(turtle).not.toContain("條件分組待核對");
+    expect(turtle).not.toContain("90 日 ROC");
   });
 });
