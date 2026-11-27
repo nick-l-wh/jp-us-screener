@@ -1,6 +1,6 @@
 # jp-us-screener
 
-美股和日股的收市後股票篩選器。Python 計算 ADX、Pullback、Squeeze On、Turtle Soup Plus One、Weak ADX 和 Young Trend。繁體中文介面可以切換市場和交易日，查看代號、名稱、成交量及 SCTR。宇宙是指數名單：美股 Russell 1000、日股 TOPIX 500。不再按市值分成大型與中型。
+美股和日股的收市後股票篩選器。Python 計算 ADX、Pullback、Squeeze On、Turtle Soup Plus One、Weak ADX 和 Young Trend。繁體中文介面可以切換市場和交易日，查看代號、名稱、成交量及 SCTR。指數名單：美股 Russell 1000、日股 TOPIX 500。
 
 [開啟線上版收市掃描](https://nick-l-wh.github.io/jp-us-screener/)。這個分支的已公布掃描是美國 2026-11-25、日本 2026-11-26。線上版要等這個分支合併進 `main` 才會換成這一份；合併前網站仍是 2026-11-20。若這個瀏覽器已有更後的交易日，則顯示該日。仍可在「資料工具」匯入快照。
 
