@@ -63,28 +63,22 @@ class EngineConfig:
 def default_thresholds() -> dict[str, CohortThresholds]:
     return {
         "US": CohortThresholds(
-            enabled=True,
+            enabled=False,
             currency="USD",
-            large_min=100_000_000_000,
-            mid_min=25_000_000_000,
-            mid_max=100_000_000_000,
+            large_min=None,
+            mid_min=None,
+            mid_max=None,
             small_min=None,
-            note=(
-                "已啟用。大型是市值大於 1,000 億美元。中型是大於 250 億美元至 1,000 億美元。"
-                "剛好等於 250 億美元，或低過該數，不歸入大型或中型。缺市值不能分層。"
-            ),
+            note="2026-11-26 起停用。美股宇宙是 Russell 1000，不再按市值分成大型與中型。",
         ),
         "JP": CohortThresholds(
-            enabled=True,
+            enabled=False,
             currency="JPY",
-            large_min=1_000_000_000_000,
-            mid_min=250_000_000_000,
-            mid_max=1_000_000_000_000,
+            large_min=None,
+            mid_min=None,
+            mid_max=None,
             small_min=None,
-            note=(
-                "已啟用。大型是市值大於 1 兆日圓（10,000 億日圓）。中型是大於 2,500 億日圓至 1 兆日圓。"
-                "剛好等於 2,500 億日圓，或低過該數，不歸入大型或中型。缺市值不能分層。"
-            ),
+            note="2026-11-26 起停用。日股宇宙是 TOPIX 500（Core30、Large70、Mid400），不再按市值分成大型與中型。",
         ),
     }
 

@@ -6,22 +6,22 @@
   "volume_basis": "unadjusted_shares",
   "cohort_thresholds": {
     "US": {
-      "enabled": true,
+      "enabled": false,
       "currency": "USD",
-      "large_min": 100000000000,
-      "mid_min": 25000000000,
-      "mid_max": 100000000000,
+      "large_min": null,
+      "mid_min": null,
+      "mid_max": null,
       "small_min": null,
-      "note": "已啟用。大型是市值大於 1,000 億美元。中型是大於 250 億美元至 1,000 億美元。剛好等於 250 億美元，或低過該數，不歸入大型或中型。缺市值不能分層。"
+      "note": "2026-11-26 起停用。美股宇宙是 Russell 1000，不再按市值分成大型與中型。"
     },
     "JP": {
-      "enabled": true,
+      "enabled": false,
       "currency": "JPY",
-      "large_min": 1000000000000,
-      "mid_min": 250000000000,
-      "mid_max": 1000000000000,
+      "large_min": null,
+      "mid_min": null,
+      "mid_max": null,
       "small_min": null,
-      "note": "已啟用。大型是市值大於 1 兆日圓（10,000 億日圓）。中型是大於 2,500 億日圓至 1 兆日圓。剛好等於 2,500 億日圓，或低過該數，不歸入大型或中型。缺市值不能分層。"
+      "note": "2026-11-26 起停用。日股宇宙是 TOPIX 500（Core30、Large70、Mid400），不再按市值分成大型與中型。"
     }
   }
 }

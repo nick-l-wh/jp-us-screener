@@ -29,6 +29,7 @@ def _flag(label: str, flag: str, clause_id: str) -> Node:
 
 
 def _cap(label: str, millions: float, clause_id: str) -> Node:
+    """Kept so an old tree can still be evaluated. Published scans do not use it."""
     return {
         "id": clause_id,
         "label": label,
@@ -71,8 +72,7 @@ and [Upper Kelt Chan(20,1.5,10) > Upper BB(20,2)]
 and [Lower Kelt Chan(20,1.5,10) < Lower BB(20,2)]
 and [BB Width(20,2) = min(63, BB Width(20,2))]
 and [Plus DI(14) < 20]
-and [Minus DI(14) < 20]
-and [market cap > 1,000]"""
+and [Minus DI(14) < 20]"""
 
 RAW_TURTLE = """[type = stock]
 and [country is us]
@@ -107,8 +107,7 @@ and
 ]
 and [SCTR < 20]
 and [ADX Line(14) < 20]
-and [Plus DI(14) < yesterday's min(25, Plus DI(14))]
-and [market cap > 10,000]"""
+and [Plus DI(14) < yesterday's min(25, Plus DI(14))]"""
 
 RAW_YOUNG = """[SCTR.large > 50]
 or [SCTR.mid > 50]
@@ -225,7 +224,6 @@ def scan_catalog() -> list[dict[str, Any]]:
                 ),
                 _cmp("+DI(14) < 20", "plus_di14", "<", 20, "sq-pdi"),
                 _cmp("-DI(14) < 20", "minus_di14", "<", 20, "sq-mdi"),
-                _cap("市值 > 1,000（百萬美元）即 > 1e9 USD", 1000, "sq-cap"),
             ),
         },
         {
@@ -279,7 +277,6 @@ def scan_catalog() -> list[dict[str, Any]]:
                     {"ref": "prev25_min_plus_di"},
                     "wk-di",
                 ),
-                _cap("市值 > 10,000（百萬美元）即 > 1e10 USD", 10000, "wk-cap"),
             ),
         },
         {
@@ -324,8 +321,6 @@ def jp_scan(scan: dict[str, Any]) -> dict[str, Any]:
     for clause in scan["tree"]["children"]:
         if clause.get("flag") == "country_us":
             clause = _flag("日本股票", "country_jp", clause["id"])
-        elif clause.get("op") == "cap_usd":
-            clause = {"op": "cap_jpy", "id": clause["id"], "label": "市值 > 1,000 億日圓", "absolute_jpy": 100_000_000_000}
         elif clause.get("id") == "tu-px":
             clause = _cmp("收市 > 500 日圓", "close", ">", 500, "tu-px")
         children.append(clause)

@@ -40,6 +40,7 @@ from jp_us_screener.sessions import (
     within_start_window,
 )
 from jp_us_screener.update import LoadedMarkets, LoadedSymbol, _fetch_charts, _fetch_quotes, assemble, run_update
+from jp_us_screener.version import SEMANTICS_VERSION
 from jp_us_screener.yahoo import YahooBudgetExceeded, YahooClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -399,7 +400,7 @@ def test_cached_shares_publish_without_a_quote_and_missing_shares_stay_blank(tmp
     assert snapshot["markets"]["JP"]["as_of"] == "2026-11-23"
 
 
-def test_no_shares_and_no_quotes_keep_the_previous_snapshot(tmp_path):
+def test_missing_caps_do_not_block_a_covered_session(tmp_path):
     public = tmp_path / "public"
     public.mkdir()
     latest = public / "latest.json"
@@ -410,6 +411,7 @@ def test_no_shares_and_no_quotes_keep_the_previous_snapshot(tmp_path):
         loaded = _loaded(SESSION, SESSION)
         for item in loaded.symbols["US"] + loaded.symbols["JP"]:
             item.quote = None
+            item.shares_outstanding = None
         return loaded
 
     code = run_update(
@@ -419,8 +421,16 @@ def test_no_shares_and_no_quotes_keep_the_previous_snapshot(tmp_path):
         now=datetime(2026, 11, 24, 8, 0, tzinfo=HKT),
         load=loader,
     )
-    assert code == 1
-    assert latest.read_bytes() == before
+    assert code == 0
+    assert latest.read_bytes() != before
+    snapshot = json.loads(latest.read_text(encoding="utf-8"))
+    assert snapshot["mode"] == "real"
+    notice = json.loads((public / "publication.json").read_text(encoding="utf-8"))
+    assert "不足一半" not in notice["body"]
+    assert "1,000 億美元" not in notice["body"]
+    universe = (tmp_path / "cache" / "inputs" / "universe.csv").read_text(encoding="utf-8")
+    assert ",0," not in universe
+    assert ",large," in universe
 
 
 def test_quote_refresh_stops_on_429_before_the_next_batch(tmp_path):
@@ -499,13 +509,15 @@ def test_dated_feed_covers_both_markets_without_quote_auth(monkeypatch, tmp_path
     headers = "market,symbol,market_cap,market_cap_currency,market_cap_as_of\n"
     (tmp_path / "marketcap.csv").write_text(headers + "US,AAA,500,USD,2026-11-23\nJP,7203,800,JPY,2026-11-23\n")
     monkeypatch.setattr(update, "COMMITTED_SHARES", tmp_path / "test-shares.json")
-    monkeypatch.setattr(YahooClient, "request_public", lambda self, url: b"directory")
     monkeypatch.setattr(YahooClient, "ensure_crumb", lambda self: pytest.fail("unexpected Yahoo authentication"))
     def listing(market):
         item = samples[market]
         return [{key: getattr(item, key) for key in ("market", "symbol", "yahoo", "name", "exchange", "currency")}]
-    monkeypatch.setattr(update, "parse_us_listings", lambda *_: (listing("US"), {"nasdaq_footer": "", "other_footer": "", "rows": 1}))
-    monkeypatch.setattr(update, "parse_jpx", lambda *_: (listing("JP"), {"effective_dates": [], "rows": 1}))
+    monkeypatch.setattr(
+        update,
+        "load_constituents",
+        lambda: (listing("US"), listing("JP"), {"US": {"rows": 1, "as_of": "2026-11-24"}, "JP": {"rows": 1, "as_of": "2026-10-30", "series": {}}}),
+    )
     def cached_charts(items, through, cache):
         for item in items:
             item.payload = samples[item.market].payload
@@ -870,8 +882,7 @@ def test_late_start_publishes_the_morning_cut_and_a_second_run_skips(tmp_path):
         for status in notice["scans"][market].values():
             assert status in {"valid", "not_valid", "incomplete"}
     universe = (cache / "inputs" / "universe.csv").read_text(encoding="utf-8")
-    assert ",," in universe
-    assert "large" not in universe
+    assert ",large," in universe
     assert "mid" not in universe
     first = (public / "latest.json").read_bytes()
     again = run_update(
@@ -1006,7 +1017,7 @@ def _snapshot_shell() -> dict:
         "snapshot_id": "abc",
         "mode": "real",
         "demo_disclaimer": None,
-        "semantics_version": "2026-11-22.provisional.2.jp-yen",
+        "semantics_version": SEMANTICS_VERSION + ".jp-yen",
         "status": "complete_with_diagnostics",
         "config": config.to_dict(),
         "markets": {

@@ -7,7 +7,7 @@ import os
 from datetime import date
 from pathlib import Path
 
-from jp_us_screener.config import CohortThresholds, EngineConfig, default_thresholds
+from jp_us_screener.config import CohortThresholds, EngineConfig
 from jp_us_screener.io import atomic_write_json
 from jp_us_screener.version import SEMANTICS_VERSION
 
@@ -20,7 +20,7 @@ class UpdateError(RuntimeError):
 
 
 def config_problem(config: EngineConfig) -> str | None:
-    """The daily publish keeps the live scan rules and market-cap cohorts."""
+    """The daily publish keeps the live scan rules and refuses market-cap cohorts."""
 
     if config.adr_policy != "unresolved" or config.otc_policy != "unresolved":
         return "ADR 或 OTC 政策不是未決議，這次更新不會改掃描規則"
@@ -30,14 +30,12 @@ def config_problem(config: EngineConfig) -> str | None:
         return "成交量基準必須是 unadjusted_shares"
     if config.min_cohort_size != 5:
         return "min_cohort_size 必須維持 5"
-    expected = default_thresholds()
-    for market, rule in expected.items():
+    for market in ("US", "JP"):
         got = config.cohort_thresholds.get(market)
-        if got is None or not got.enabled:
-            return f"{market} 市值分層未啟用"
-        for field in ("currency", "large_min", "mid_min", "mid_max", "small_min"):
-            if getattr(got, field) != getattr(rule, field):
-                return f"{market} {field} 與已公布門檻不同"
+        if got is None:
+            return f"{market} 缺少宇宙設定"
+        if got.enabled:
+            return f"{market} 仍啟用市值分層。2026-11-26 起宇宙是指數名單，不能再用市值門檻"
     return None
 
 
@@ -63,18 +61,6 @@ def scan_publication_status(block: dict) -> str:
     return "valid"
 
 
-def _cohort_counts(snapshot: dict, market: str) -> tuple[int, int, int, int]:
-    ranks = (snapshot.get("cohort_ranks") or {}).get(market) or {}
-    large = len(ranks.get("large") or [])
-    mid = len(ranks.get("mid") or [])
-    unranked = [row for row in (snapshot.get("cohort_ranks") or {}).get("unranked") or [] if row.get("market") == market]
-    large += sum(1 for row in unranked if row.get("cohort") == "large")
-    mid += sum(1 for row in unranked if row.get("cohort") == "mid")
-    outside = sum(1 for row in unranked if row.get("reason") == "cap_outside_configured_cohorts")
-    missing = sum(1 for row in unranked if row.get("reason") == "missing_market_cap")
-    return large, mid, outside, missing
-
-
 def build_publication(snapshot: dict, notes: dict[str, str] | None = None) -> dict:
     us = snapshot["markets"]["US"]["as_of"]
     jp = snapshot["markets"]["JP"]["as_of"]
@@ -82,20 +68,17 @@ def build_publication(snapshot: dict, notes: dict[str, str] | None = None) -> di
         market: {scan_id: scan_publication_status(snapshot["scans"][scan_id]["markets"][market]) for scan_id in SCAN_IDS}
         for market in ("US", "JP")
     }
-    us_large, us_mid, us_out, us_miss = _cohort_counts(snapshot, "US")
-    jp_large, jp_mid, jp_out, jp_miss = _cohort_counts(snapshot, "JP")
+    us_eligible = snapshot["markets"]["US"].get("eligible_stocks")
+    jp_eligible = snapshot["markets"]["JP"].get("eligible_stocks")
     sentences = [
         f"美國數據日期 {us}。日本數據日期 {jp}。",
         (
-            f"大型與中型按市值劃分。美國大型大於 1,000 億美元（{us_large} 檔），"
-            f"中型大於 250 億至 1,000 億美元（{us_mid} 檔）。"
-            f"日本大型大於 1 兆日圓（{jp_large} 檔），中型大於 2,500 億至 1 兆日圓（{jp_mid} 檔）。"
+            "宇宙是指數名單，不是市值分層。美股是 Russell 1000（iShares IWB 持股裡的權益證券）。"
+            "日股是 TOPIX 500（Core30、Large70、Mid400）。沒有用舊的市值區間剔除。"
+            f"納入計算：美股 {us_eligible} 檔、日股 {jp_eligible} 檔。名單不是全市場。"
         ),
-        (
-            f"低過中型下限：美股 {us_out} 檔、日股 {jp_out} 檔。"
-            f"沒有市值：美股 {us_miss} 檔、日股 {jp_miss} 檔。沒有市值不會當成 0，也不會歸入族群。"
-        ),
-        "優先採用幣別及交易日相符的本機市值。其餘使用 Yahoo 報價或已保存股數乘以該交易日收市價。報價的股數乘股價與市值相差超過 1% 時捨棄該報價。沿用股數的觀察日另註明，缺市值時留空。",
+        "技術排名在各自的整份名單內計算，用來對上原文的 SCTR 條件。沒有另設中型市值族群。",
+        "Squeeze 與 Weak ADX 不再使用市值條件。缺市值留空，不會當成 0，也不會用示範數據填價。",
     ]
     for market, label in (("US", "美股"), ("JP", "日股")):
         hits = []
@@ -123,9 +106,6 @@ def build_publication(snapshot: dict, notes: dict[str, str] | None = None) -> di
             sentence += "。沒有有效結果、不會顯示成 0：" + "、".join(blocked)
         sentence += "。"
         sentences.append(sentence)
-    us_eligible = snapshot["markets"]["US"].get("eligible_stocks")
-    jp_eligible = snapshot["markets"]["JP"].get("eligible_stocks")
-    sentences.append(f"納入計算：美股 {us_eligible} 檔、日股 {jp_eligible} 檔。名單不是全市場。")
     for text in (notes or {}).values():
         if text:
             sentences.append(text)

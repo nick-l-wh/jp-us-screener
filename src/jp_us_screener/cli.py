@@ -73,7 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     update.add_argument("--public-dir", default="web/public/data")
     update.add_argument("--config", default="config/default.json")
     update.add_argument("--cache-dir", default="data/update-cache")
-    update.add_argument("--check", action="store_true", help="只檢查名單和一檔美股、一檔日股，不寫公開快照")
+    update.add_argument("--check", action="store_true", help="檢查指數名單。加上 --prices-dir 時只讀本機 CSV，不呼叫 Yahoo")
+    update.add_argument("--prices-dir", default="", help="本機日線 CSV 目錄（Date, Open, High, Low, Close, AdjClose, Volume）。設定後不呼叫 Yahoo")
 
     args = parser.parse_args(argv)
     try:

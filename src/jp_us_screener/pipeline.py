@@ -271,7 +271,7 @@ def _assemble(
         "rank_label": RANK_LABEL,
         "config": config.to_dict(),
         "assumptions": [
-            {**note, "title": "日股門檻", "body": "Squeeze On 及 Weak ADX 的市值須大於 1,000 億日圓，Turtle Soup Plus One 的收市價須大於 500 日圓。"}
+            {**note, "title": "日股門檻", "body": "真實模式的日股會跑 Squeeze 與 Turtle。Squeeze 與 Weak ADX 沒有市值條件。Turtle Soup Plus One 的收市價須大於 500 日圓。美元價格不會改寫成日圓。"}
             if mode == "real" and note["id"] == "jp-us-only-scans" else note for note in ASSUMPTIONS
         ],
         "rank_method": RANK_METHOD,

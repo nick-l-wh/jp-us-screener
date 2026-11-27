@@ -95,7 +95,7 @@ RANK_METHOD = {
     "label": RANK_LABEL,
     "official_parity": False,
     "range": [0.0, 99.9],
-    "scope": "每個市場、每個 cohort 各自排名。大型欄位與中型欄位不是同一條全球排名。",
+    "scope": "每個市場的指數名單各自排名一次。公布的宇宙沒有按市值再分成大型與中型。",
     "weights": {
         "pct_distance_ema200": 0.30,
         "roc125": 0.30,

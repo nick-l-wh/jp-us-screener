@@ -33,5 +33,6 @@ web/src/review/
 *.zip
 *.csv
 !web/public/templates/*.csv
+!universes/**/*.csv
 web/public/history/
 exports/
