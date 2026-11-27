@@ -88,7 +88,7 @@ export function MarketResults({ market, scanId, history, choice, onChoose, onImp
               {day?.coverage && <p>行情檢查通過 {day.coverage.eligible.toLocaleString()} 隻。</p>}
             </div>
           )}
-          {loading && !day && <p className="screen-loading" data-testid="loading-published">正在載入已公布的 2026-11-20 結果</p>}
+          {loading && !day && <p className="screen-loading" data-testid="loading-published">正在載入已公布結果</p>}
           {error && <p className="screen-error" role="alert">{error}</p>}
           {day?.demo && <p className="screen-demo" role="status">示範／合成資料，並非實際行情或今日命中</p>}
           {!meta ? (
@@ -96,7 +96,7 @@ export function MarketResults({ market, scanId, history, choice, onChoose, onImp
               <div className="screen-info">
                 <p>You have used <strong>{used}</strong> of your <strong>6</strong> scans</p>
                 <p className="screen-source">資料日期：{date ?? "—"} ｜ {sourceNote(day, snapshotId)}</p>
-                <p className="screen-source" data-testid="universe-rule">宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。Squeeze 與 Weak ADX 不再使用市值條件。已公布的 2026-11-20 快照維持原樣，要等下一次用本機價格通過檢查才會更新。</p>
+                <p className="screen-source" data-testid="universe-rule">宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。Squeeze 與 Weak ADX 不再使用市值條件。已公布快照是美國 2026-11-25、日本 2026-11-26。</p>
               </div>
               <Coverage note={day?.notice} />
               <div className="screen-table-wrap">

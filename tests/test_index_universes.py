@@ -42,11 +42,16 @@ def test_published_lists_are_russell_1000_and_topix_500_without_cap_filters():
     assert INDEX_RANK_COHORT == "large"
 
 
-def test_live_snapshot_is_not_replaced_by_this_change():
+def test_nov20_file_remains_beside_the_validated_local_snapshot():
     latest = json.loads((ROOT / "web" / "public" / "data" / "latest.json").read_text(encoding="utf-8"))
     dated = json.loads((ROOT / "web" / "public" / "data" / "snapshot-2026-11-20.json").read_text(encoding="utf-8"))
-    assert latest["snapshot_id"] == dated["snapshot_id"] == "333c3e1d581cb716"
-    assert latest["semantics_version"] == "2026-11-22.provisional.2.jp-yen"
+    assert dated["snapshot_id"] == "333c3e1d581cb716"
+    assert dated["semantics_version"] == "2026-11-22.provisional.2.jp-yen"
+    assert dated["markets"]["US"]["as_of"] == dated["markets"]["JP"]["as_of"] == "2026-11-20"
+    assert latest["snapshot_id"] == "b10aaf00a207ce76"
+    assert latest["semantics_version"] == "2026-11-26.index.1.jp-yen"
+    assert latest["markets"]["US"]["as_of"] == "2026-11-25"
+    assert latest["markets"]["JP"]["as_of"] == "2026-11-26"
 
 
 def test_local_csv_maps_tickers_and_does_not_fill_holes(tmp_path: Path):

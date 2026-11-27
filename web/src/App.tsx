@@ -147,7 +147,7 @@ export function App() {
           JP: current.JP ?? choosePublishedDay(Object.values(merged), "JP", publishedSession(published, "JP")),
         }));
       }
-      if (!publishedSnap) setError("讀不到已公布的 2026-11-20 快照");
+      if (!publishedSnap) setError("讀不到已公布快照");
       setLoadingPublished(false);
     })();
     return () => { active = false; };
@@ -350,7 +350,7 @@ export function App() {
             <section className="empty" data-testid="empty-real">
               <p className="seal">實</p>
               <h2>{loadingPublished ? "正在載入已公布結果" : EMPTY_REAL_MESSAGE}</h2>
-              <p>{loadingPublished ? "數據日期 2026-11-20。" : "用命令列由本地 CSV 算出快照，再在這裡匯入。示範開關只會載入合成代號，不會填上看似真實的報價。"}</p>
+              <p>{loadingPublished ? "正在載入已公布的美國與日本收市結果。" : "用命令列由本地 CSV 算出快照，再在這裡匯入。示範開關只會載入合成代號，不會填上看似真實的報價。"}</p>
             </section>
           )}
           {snapshot && scan && result && (
