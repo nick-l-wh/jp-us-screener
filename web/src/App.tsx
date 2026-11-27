@@ -4,8 +4,10 @@ import { asset } from "./asset";
 import { applyPublication, choosePublishedDay, hitLabel, isPublicationNotice, publishedSession, unavailableCopy, type PublicationNotice } from "./publication";
 import { preflightCsv, toCsv, type PreflightReport } from "./csv";
 import { cohortLabel, diffLabel, formatNumber, formatRank, formatVolume, statusLabel } from "./format";
+import { isIngestDiagnostics, isPublicUniverse, type IngestDiagnostics, type PublicUniverse } from "./coverageNote";
 import { MarketResults } from "./MarketResults";
 import { SCAN_ROUTES, type MarketCode } from "./ScanResults";
+import { isRulesFile, type RulesFile } from "./scanCriteria";
 import {
   DEMO_DISCLAIMER,
   EMPTY_REAL_MESSAGE,
@@ -160,7 +162,9 @@ export function App() {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [preflight, setPreflight] = useState<PreflightReport | null>(null);
   const [rulesFallback, setRulesFallback] = useState<Snapshot["assumptions"] | null>(null);
-  const [currentRules, setCurrentRules] = useState<PublishedRules | null>(null);
+  const [currentRules, setCurrentRules] = useState<RulesFile | null>(null);
+  const [universe, setUniverse] = useState<PublicUniverse | null>(null);
+  const [ingest, setIngest] = useState<IngestDiagnostics | null>(null);
 
   const snapshot = demoOn ? demoSnap : realSnap;
   const showDemo = snapshot ? forcesDemoBanner(snapshot) : demoOn;
@@ -181,9 +185,22 @@ export function App() {
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (payload?.assumptions) setRulesFallback(payload.assumptions);
-        if (payload?.semantics_version && payload?.assumptions && payload?.scans) setCurrentRules(payload);
+        if (isRulesFile(payload)) setCurrentRules(payload);
       })
       .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      fetch(asset("data/universe.json")).then((response) => (response.ok ? response.json() : null)),
+      fetch(asset("data/ingest-diagnostics.json")).then((response) => (response.ok ? response.json() : null)),
+    ]).then(([universePayload, ingestPayload]) => {
+      if (!active) return;
+      if (isPublicUniverse(universePayload)) setUniverse(universePayload);
+      if (isIngestDiagnostics(ingestPayload)) setIngest(ingestPayload);
+    }).catch(() => undefined);
+    return () => { active = false; };
   }, []);
 
   const scan = snapshot?.scans[scanId];
@@ -269,6 +286,10 @@ export function App() {
   if (route.kind === "scan") {
     return <MarketResults scanId={route.scanId} market={route.market} history={history} choice={chosen[route.market]} loading={loadingPublished}
       snapshotId={notice?.snapshot_id ?? realSnap?.snapshot_id}
+      snapshot={realSnap}
+      universe={universe}
+      ingest={ingest}
+      rules={currentRules}
       error={error}
       onImport={file => void onSnapshotFile(file)}
       onChoose={key => setChosen(current => ({ ...current, [route.market]: key }))} />;
@@ -425,13 +446,7 @@ export function App() {
   );
 }
 
-interface PublishedRules {
-  semantics_version: string;
-  assumptions: Snapshot["assumptions"];
-  scans: { id: string; raw_source: string }[];
-}
-
-function rulesMatch(snapshot: Snapshot, rules: PublishedRules): boolean {
+function rulesMatch(snapshot: Snapshot, rules: RulesFile): boolean {
   return snapshot.semantics_version === rules.semantics_version || snapshot.semantics_version === `${rules.semantics_version}.jp-yen`;
 }
 

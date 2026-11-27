@@ -1,11 +1,14 @@
 import { useState, type ReactNode } from "react";
+import { buildCoverageNote, coverageFromSnapshot, type IngestDiagnostics, type PublicUniverse } from "./coverageNote";
 import { SCAN_ROUTES, ScanResults, type MarketCode } from "./ScanResults";
+import { buildCriteria, type RulesFile } from "./scanCriteria";
 import type { TradingDay } from "./history";
 import { hitLabel } from "./publication";
+import type { Snapshot } from "./types";
 
 const SCAN_IDS = SCAN_ROUTES.map(scan => scan.id);
 
-export function MarketResults({ market, scanId, history, choice, onChoose, onImport, error, loading, snapshotId }: {
+export function MarketResults({ market, scanId, history, choice, onChoose, onImport, error, loading, snapshotId, snapshot, universe, ingest, rules }: {
   market: MarketCode;
   scanId: string | null;
   history: Record<string, TradingDay>;
@@ -15,6 +18,10 @@ export function MarketResults({ market, scanId, history, choice, onChoose, onImp
   error: string | null;
   loading?: boolean;
   snapshotId?: string;
+  snapshot?: Snapshot | null;
+  universe?: PublicUniverse | null;
+  ingest?: IngestDiagnostics | null;
+  rules?: RulesFile | null;
 }) {
   const marketPath = "#/" + market.toLowerCase();
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() => Object.fromEntries(SCAN_IDS.map(id => [id, true])));
@@ -98,7 +105,7 @@ export function MarketResults({ market, scanId, history, choice, onChoose, onImp
                 <p className="screen-source">資料日期：{date ?? "—"} ｜ {sourceNote(day, snapshotId)}</p>
                 <p className="screen-source" data-testid="universe-rule">宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。Squeeze 與 Weak ADX 不再使用市值條件。已公布快照是美國 2026-11-25、日本 2026-11-26。</p>
               </div>
-              <Coverage note={day?.notice} />
+              <Coverage note={day?.notice} snapshot={snapshot} universe={universe} ingest={ingest} rules={rules} market={market} scanId={null} date={date} demo={day?.demo} />
               <div className="screen-table-wrap">
                 <table className="screen-table" aria-label="Your Scans">
                   <thead>
@@ -130,7 +137,7 @@ export function MarketResults({ market, scanId, history, choice, onChoose, onImp
             </>
           ) : (
             <div className="screen-results">
-              <Coverage note={day?.notice} />
+              <Coverage note={day?.notice} snapshot={snapshot} universe={universe} ingest={ingest} rules={rules} market={market} scanId={meta.id} date={date} demo={day?.demo} />
               <ScanResults key={market + meta.id + selected?.key} scanId={meta.id} market={market} day={day} date={date} />
             </div>
           )}
@@ -154,14 +161,47 @@ function marketRule(id: string, market: MarketCode): string {
   return SCAN_ROUTES.find(scan => scan.id === id)?.rule ?? "";
 }
 
-function Coverage({ note }: { note?: string }): ReactNode {
-  if (!note) return null;
-  const historical = note.includes("按市值劃分");
+function Coverage({ note, snapshot, universe, ingest, rules, market, scanId, date, demo }: {
+  note?: string;
+  snapshot?: Snapshot | null;
+  universe?: PublicUniverse | null;
+  ingest?: IngestDiagnostics | null;
+  rules?: RulesFile | null;
+  market: MarketCode;
+  scanId: string | null;
+  date: string | null;
+  demo?: boolean;
+}): ReactNode {
+  const generated = !demo && snapshot && date && snapshot.markets[market]?.as_of === date
+    ? buildCoverageNote(coverageFromSnapshot(snapshot), universe ?? null, ingest ?? null)
+    : null;
+  const shown = generated ?? note ?? "";
+  const criteria = rules ? buildCriteria(rules, scanId) : null;
+  if (!shown && !criteria?.scans.length) return null;
+  const historical = !generated && shown.includes("按市值劃分");
+  const paragraphs = shown.split(/\n\n+/).filter((paragraph) => paragraph.length > 0);
   return (
     <details className="screen-caveat">
       <summary>覆蓋範圍與限制</summary>
       {historical && <p className="screen-source">這段是 2026-11-20 快照當時的說明，不是現在的宇宙規則。現行宇宙是 Russell 1000 與 TOPIX 500，不再按市值分成大型與中型。</p>}
-      <p className="publication-note" data-testid="publication-note">{note}</p>
+      {paragraphs.length > 0 && (
+        <div className="publication-note" data-testid="publication-note">
+          {paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+        </div>
+      )}
+      {criteria && criteria.scans.length > 0 && (
+        <div className="screen-criteria" data-testid="scan-criteria">
+          <h3>掃描條件</h3>
+          {criteria.intro.map((paragraph) => <p key={paragraph} className="criteria-intro">{paragraph}</p>)}
+          {criteria.scans.map((scan) => (
+            <article key={scan.id} className={scan.id === scanId ? "is-current" : undefined} data-testid={`criteria-${scan.id}`} data-current={scan.id === scanId ? "true" : undefined}>
+              <h4>{scan.name_en}<span>{scan.name_zh}</span></h4>
+              {scan.warning && <p className="criteria-warning">{scan.warning}</p>}
+              <p>{scan.text}</p>
+            </article>
+          ))}
+        </div>
+      )}
     </details>
   );
 }

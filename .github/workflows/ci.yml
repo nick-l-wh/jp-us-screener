@@ -29,6 +29,7 @@ jobs:
           VITE_BASE: /jp-us-screener/
         run: |
           npm ci
+          npm test
           npm run typecheck
           npm run build
       - uses: actions/upload-pages-artifact@v4

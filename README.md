@@ -33,6 +33,7 @@ python -m jp_us_screener compute --ohlcv data/ohlcv.csv --universe data/universe
 ```sh
 python -m pytest
 cd web
+npm test
 npm run build
 python standalone.py ../screener.html
 ```
