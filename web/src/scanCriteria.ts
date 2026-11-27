@@ -1,4 +1,4 @@
-/** Render the official scan clauses from the engine trees in rules.json. */
+/** Official display copy for 「掃描條件」. This is not derived from the engine trees. */
 
 export interface RuleNode {
   op: string;
@@ -35,19 +35,87 @@ export interface RulesFile {
 
 export interface FormattedScan {
   id: string;
-  name_en: string;
-  name_zh: string;
-  warning: string | null;
+  title: string;
   text: string;
 }
 
 export interface CriteriaView {
-  intro: string[];
+  intro: string;
   scans: FormattedScan[];
 }
 
-const SCAN_ORDER = ["adx", "pullback", "squeeze", "turtle", "weak", "young"];
-const YOUNG_TYPE = "Young Trend 原文沒有類型條款，股票限定是本引擎的宇宙政策。";
+export const CRITERIA_HEADING = "掃描條件";
+
+export const CRITERIA_INTRO =
+  "排名按 ChartSchool 公開的 SCTR 權重，在每個市場的整份指數名單內計算一次，標成「技術排名（依SCTR公開方法，非官方）」。";
+
+const OFFICIAL_SCANS: FormattedScan[] = [
+  {
+    id: "adx",
+    title: "ADX",
+    text: [
+      "大型族群技術排名 > 0 或 中型族群技術排名 > 0；且 90 日 ROC > 20；",
+      "且 今日 +DI(14) > 不含今日的前 25 根 +DI(14) 最高值；",
+      "且 類型為股票；且 成交量（股數）> 100000；",
+      "且 所屬族群技術排名 > 70。",
+    ].join("\n"),
+  },
+  {
+    id: "pullback",
+    title: "Pullback回調",
+    text: [
+      "大型族群技術排名 > 70 或 中型族群技術排名 > 70；且 20 日 ROC > 20；",
+      "且 +DI(14) > 30；且 類型為股票。",
+      "依 Daily ULCER(10) 由大至小排序。Daily ULCER(10) 是排序不是過濾。",
+    ].join("\n"),
+  },
+  {
+    id: "squeeze",
+    title: "Squeeze On擠壓開啟",
+    text: [
+      "類型為股票；",
+      "美股：國家為美國；日股：日本股票；",
+      "20 日平均成交量（股數）> 300000；",
+      "收市 > SMA(200)；SMA(200) > 20 根之前的 SMA(200)；",
+      "Keltner 上軌 > 布林上軌；Keltner 下軌 < 布林下軌；",
+      "布林寬度等於含今日的 63 根最小值；",
+      "+DI(14) < 20；-DI(14) < 20。",
+    ].join("\n"),
+  },
+  {
+    id: "turtle",
+    title: "Turtle Soup Plus One - buy海龜湯加一（買入）",
+    text: [
+      "類型為股票；",
+      "美股：國家為美國；日股：日本股票；",
+      "20 日平均成交量（股數）> 500000；",
+      "group 不是 ETF；",
+      "美股：收市 > 5（美元；不換算成日圓）；日股：收市 > 500 日圓；",
+      "今日低位等於含今日的 20 根最低值；",
+      "3 至 10 根前任一低位等於昨日的 20 根最低值；",
+      "收市 <= 昨日 20 根最低值 × 1.005。",
+    ].join("\n"),
+  },
+  {
+    id: "weak",
+    title: "Weak ADX弱 ADX",
+    text: [
+      "類型為股票；成交量（股數）> 100000；",
+      "（大型族群技術排名 > 0 或 中型族群技術排名 > 0）；",
+      "所屬族群技術排名 < 20；",
+      "ADX(14) < 20；今日 +DI(14) < 不含今日的前 25 根 +DI(14) 最低值。",
+    ].join("\n"),
+  },
+  {
+    id: "young",
+    title: "Young Trend初生趨勢",
+    text: [
+      "大型族群技術排名 > 50 或 中型族群技術排名 > 50；",
+      "且 3 日 ROC > 9；且 SMA(3,成交量) > SMA(50,成交量) × 1.5。依 ROC(3) 由大至小排序。",
+      "ROC(3) 是排序不是過濾。預設較大值在前。",
+    ].join("\n"),
+  },
+];
 
 export function isRulesFile(value: unknown): value is RulesFile {
   if (!value || typeof value !== "object") return false;
@@ -58,88 +126,11 @@ export function isRulesFile(value: unknown): value is RulesFile {
     && record.scans.every((scan) => !!scan && typeof scan.id === "string" && typeof scan.name_zh === "string");
 }
 
-export function buildCriteria(rules: RulesFile, currentId: string | null): CriteriaView {
-  const byId = new Map(rules.scans.map((scan) => [scan.id, scan]));
-  const youngNote = rules.assumptions.some((item) => item.id === "universe" && item.body.includes(YOUNG_TYPE))
-    ? YOUNG_TYPE
-    : null;
-  const ordered = SCAN_ORDER.map((id) => byId.get(id)).filter((scan): scan is ScanRule => !!scan);
-  for (const scan of rules.scans) {
-    if (!SCAN_ORDER.includes(scan.id)) ordered.push(scan);
-  }
-  const formatted = ordered.map((scan) => formatScan(scan, youngNote));
+/** A known scan id shows only that scan. Any other view shows all six, in official order. */
+export function buildCriteria(currentId: string | null): CriteriaView {
+  const current = OFFICIAL_SCANS.find((scan) => scan.id === currentId);
   return {
-    intro: introFrom(rules),
-    scans: orderForCurrent(formatted, currentId),
+    intro: CRITERIA_INTRO,
+    scans: current ? [current] : OFFICIAL_SCANS,
   };
-}
-
-export function orderForCurrent(scans: FormattedScan[], currentId: string | null): FormattedScan[] {
-  if (!currentId) return scans;
-  const current = scans.find((scan) => scan.id === currentId);
-  if (!current) return scans;
-  return [current, ...scans.filter((scan) => scan.id !== currentId)];
-}
-
-function introFrom(rules: RulesFile): string[] {
-  return ["grouping", "rank"]
-    .map((id) => rules.assumptions.find((item) => item.id === id)?.body)
-    .filter((body): body is string => !!body);
-}
-
-function formatScan(scan: ScanRule, youngNote: string | null): FormattedScan {
-  const warning = scan.grouping_warning ?? null;
-  if (!scan.tree) {
-    return { id: scan.id, name_en: scan.name_en, name_zh: scan.name_zh, warning, text: scan.raw_source ?? "" };
-  }
-  const parts = [punctuate(formatNode(scan.tree, scan.jp_tree, scan.grouping))];
-  if (scan.sort) parts.push(sortSentence(scan.sort));
-  if (scan.id === "young" && youngNote && !hasFlag(scan.tree, "is_stock")) parts.push(youngNote);
-  if ((scan.id === "squeeze" || scan.id === "weak") && !hasCap(scan.tree) && !hasCap(scan.jp_tree)) {
-    parts.push("沒有市值條件。");
-  }
-  return { id: scan.id, name_en: scan.name_en, name_zh: scan.name_zh, warning, text: parts.join("") };
-}
-
-function formatNode(us: RuleNode, jp: RuleNode | undefined, grouping: string): string {
-  if ((us.op === "and" || us.op === "or") && us.children?.length) {
-    const jpChildren = jp && jp.op === us.op ? jp.children ?? [] : [];
-    const parts = us.children
-      .map((child, index) => formatNode(child, jpChildren[index], grouping))
-      .filter((part) => part.length > 0);
-    if (us.op === "or") {
-      const joined = parts.join(" 或 ");
-      return grouping === "explicit_brackets" ? `（${joined}）` : joined;
-    }
-    const separator = grouping === "provisional_cohort_and_rest" ? "；且 " : "；";
-    return parts.join(separator);
-  }
-  const left = us.label ?? "";
-  const right = jp?.label;
-  if (!right || right === left) return left;
-  return `美股：${left}；日股：${right}`;
-}
-
-function sortSentence(sort: ScanSort): string {
-  const name = sort.field === "ulcer10" ? "Daily ULCER(10)" : sort.field === "roc3" ? "ROC(3)" : sort.field;
-  const direction = sort.direction === "desc" ? "由大至小" : sort.direction === "asc" ? "由小至大" : sort.direction;
-  const lead = `依 ${name} ${direction}排序。`;
-  if (!sort.direction_verified && sort.note) return lead + sort.note;
-  return lead;
-}
-
-function punctuate(text: string): string {
-  return /[。！？.]$/.test(text) ? text : `${text}。`;
-}
-
-function hasFlag(node: RuleNode | undefined, flag: string): boolean {
-  if (!node) return false;
-  if (node.flag === flag) return true;
-  return (node.children ?? []).some((child) => hasFlag(child, flag));
-}
-
-function hasCap(node: RuleNode | undefined): boolean {
-  if (!node) return false;
-  if (node.op === "cap_usd" || node.op === "cap_jpy") return true;
-  return (node.children ?? []).some((child) => hasCap(child));
 }

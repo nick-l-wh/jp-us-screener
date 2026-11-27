@@ -289,7 +289,6 @@ export function App() {
       snapshot={realSnap}
       universe={universe}
       ingest={ingest}
-      rules={currentRules}
       error={error}
       onImport={file => void onSnapshotFile(file)}
       onChoose={key => setChosen(current => ({ ...current, [route.market]: key }))} />;
