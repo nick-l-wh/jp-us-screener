@@ -50,13 +50,18 @@ def test_published_nov20_snapshot_matches_the_computed_result():
 
 def test_published_latest_is_the_local_price_snapshot():
     latest = json.loads((DATA / "latest.json").read_text(encoding="utf-8"))
-    dated = json.loads((DATA / "snapshot-us-2026-11-25-jp-2026-11-27.json").read_text(encoding="utf-8"))
+    dated = json.loads((DATA / "snapshot-2026-11-27.json").read_text(encoding="utf-8"))
+    carried = json.loads((DATA / "snapshot-us-2026-11-25-jp-2026-11-27.json").read_text(encoding="utf-8"))
     prior_local = json.loads((DATA / "snapshot-us-2026-11-25-jp-2026-11-26.json").read_text(encoding="utf-8"))
     notice = json.loads((DATA / "publication.json").read_text(encoding="utf-8"))
     prior = json.loads((DATA / "snapshot-2026-11-20.json").read_text(encoding="utf-8"))
     assert latest == dated
-    assert latest["snapshot_id"] == "6e766a9a66d32d24"
+    assert latest["snapshot_id"] == "820ba67e10634ae7"
     assert latest["snapshot_id"] != prior["snapshot_id"]
+    assert latest["snapshot_id"] != carried["snapshot_id"]
+    assert carried["snapshot_id"] == "6e766a9a66d32d24"
+    assert carried["markets"]["US"]["as_of"] == "2026-11-25"
+    assert carried["markets"]["JP"]["as_of"] == "2026-11-27"
     assert prior_local["snapshot_id"] == "b10aaf00a207ce76"
     assert prior_local["markets"]["US"]["as_of"] == "2026-11-25"
     assert prior_local["markets"]["JP"]["as_of"] == "2026-11-26"
@@ -64,25 +69,26 @@ def test_published_latest_is_the_local_price_snapshot():
     assert latest["semantics_version"] == "2026-11-26.index.1.jp-yen"
     assert latest["mode"] == "real"
     assert latest["demo_disclaimer"] is None
-    assert latest["markets"]["US"]["as_of"] == "2026-11-25"
+    assert latest["markets"]["US"]["as_of"] == "2026-11-27"
     assert latest["markets"]["JP"]["as_of"] == "2026-11-27"
     assert latest["markets"]["US"]["eligible_stocks"] == 1017
     assert latest["markets"]["JP"]["eligible_stocks"] == 496
     assert latest["config"]["cohort_thresholds"]["US"]["enabled"] is False
     assert latest["config"]["cohort_thresholds"]["JP"]["enabled"] is False
-    assert symbols(latest, "adx", "US") == ["HPQ", "TSCO", "VRSN"]
-    assert symbols(latest, "pullback", "US") == ["INSM", "BMRN", "BBIO", "RKT", "BILL", "VVV", "ACM", "GPK", "COLM", "TSCO", "VFC", "EPAM", "TNL", "VNT", "REGN", "CMG", "CLX", "FCN", "NXST", "GEN", "ADT"]
-    assert symbols(latest, "squeeze", "US") == ["WEX"]
-    assert symbols(latest, "turtle", "US") == []
-    assert symbols(latest, "weak", "US") == ["ADI", "CDNS", "ECHO", "GTES", "IRM", "ON", "SNPS"]
-    assert symbols(latest, "young", "US") == ["AMTM", "INSM", "ZS", "BMRN", "HPQ", "AWI", "GAP", "DLTR"]
+    assert symbols(latest, "adx", "US") == ["THC"]
+    assert symbols(latest, "pullback", "US") == ["INSM", "BBIO", "CHTR", "RKT", "GPK", "BILL", "VFC", "ACM", "COLM", "MDLN", "EPAM", "VNT", "REGN", "CLX", "NXST"]
+    assert symbols(latest, "squeeze", "US") == []
+    assert symbols(latest, "turtle", "US") == ["MTN"]
+    assert symbols(latest, "weak", "US") == []
+    assert symbols(latest, "young", "US") == ["AMTM", "INSM", "HPQ"]
     assert symbols(latest, "adx", "JP") == []
     assert symbols(latest, "pullback", "JP") == ["6532", "2212", "3659", "9766", "4912", "2702", "9684", "9706", "4661"]
     assert symbols(latest, "squeeze", "JP") == []
     assert symbols(latest, "turtle", "JP") == []
     assert symbols(latest, "weak", "JP") == []
     assert symbols(latest, "young", "JP") == []
-    assert latest["scans"]["turtle"]["markets"]["US"]["counts"]["no_match"] == 1017
+    assert latest["scans"]["squeeze"]["markets"]["US"]["counts"]["no_match"] == 1017
+    assert latest["scans"]["weak"]["markets"]["US"]["counts"]["no_match"] == 1017
     assert latest["scans"]["adx"]["markets"]["JP"]["counts"]["no_match"] == 496
     assert latest["scans"]["squeeze"]["markets"]["JP"]["counts"]["no_match"] == 496
     assert latest["scans"]["turtle"]["markets"]["JP"]["counts"]["no_match"] == 496
@@ -99,7 +105,7 @@ def test_published_latest_is_the_local_price_snapshot():
                 assert row["market_cap"] in (None, "")
                 assert not row.get("data_notice")
     assert notice["snapshot_id"] == latest["snapshot_id"]
-    assert notice["sessions"] == {"US": "2026-11-25", "JP": "2026-11-27"}
+    assert notice["sessions"] == {"US": "2026-11-27", "JP": "2026-11-27"}
     for market in ("US", "JP"):
         for scan_id in ("adx", "pullback", "squeeze", "turtle", "weak", "young"):
             assert notice["scans"][market][scan_id] == "valid"
