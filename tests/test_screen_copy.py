@@ -36,7 +36,7 @@ def test_snapshot_omissions_match_the_ingest_diagnostics():
     snapshot = json.loads((DATA / "latest.json").read_text(encoding="utf-8"))
     universe = json.loads((DATA / "universe.json").read_text(encoding="utf-8"))
     ingest = json.loads((DATA / "ingest-diagnostics.json").read_text(encoding="utf-8"))
-    assert snapshot["snapshot_id"] == "6e766a9a66d32d24"
+    assert snapshot["snapshot_id"] == "820ba67e10634ae7"
     assert ingest["snapshot_id"] == snapshot["snapshot_id"]
     eligible = _eligible(snapshot)
     for market in ("US", "JP"):
@@ -52,7 +52,7 @@ def test_snapshot_omissions_match_the_ingest_diagnostics():
     assert set(ingest["no_bars"]["JP"]) == {"641A", "642A", "646A"}
     assert set(ingest["jump"]["JP"]) == {"8303", "8377"}
     short = [row for row in snapshot["cohort_ranks"]["unranked"] if row["reason"] == "indicator_score_unavailable"]
-    assert len(short) == 16
+    assert len(short) == 15
     assert {row["market"] for row in short} == {"US"}
     assert all(v is None for v in ema([1.0] * 199, 200))
     assert ema([1.0] * 200, 200)[-1] is not None

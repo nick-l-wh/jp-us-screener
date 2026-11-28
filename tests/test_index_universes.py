@@ -48,9 +48,9 @@ def test_nov20_file_remains_beside_the_validated_local_snapshot():
     assert dated["snapshot_id"] == "333c3e1d581cb716"
     assert dated["semantics_version"] == "2026-11-22.provisional.2.jp-yen"
     assert dated["markets"]["US"]["as_of"] == dated["markets"]["JP"]["as_of"] == "2026-11-20"
-    assert latest["snapshot_id"] == "6e766a9a66d32d24"
+    assert latest["snapshot_id"] == "820ba67e10634ae7"
     assert latest["semantics_version"] == "2026-11-26.index.1.jp-yen"
-    assert latest["markets"]["US"]["as_of"] == "2026-11-25"
+    assert latest["markets"]["US"]["as_of"] == "2026-11-27"
     assert latest["markets"]["JP"]["as_of"] == "2026-11-27"
 
 
