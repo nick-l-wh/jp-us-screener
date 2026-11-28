@@ -36,7 +36,7 @@ def test_snapshot_omissions_match_the_ingest_diagnostics():
     snapshot = json.loads((DATA / "latest.json").read_text(encoding="utf-8"))
     universe = json.loads((DATA / "universe.json").read_text(encoding="utf-8"))
     ingest = json.loads((DATA / "ingest-diagnostics.json").read_text(encoding="utf-8"))
-    assert snapshot["snapshot_id"] == "b10aaf00a207ce76"
+    assert snapshot["snapshot_id"] == "6e766a9a66d32d24"
     assert ingest["snapshot_id"] == snapshot["snapshot_id"]
     eligible = _eligible(snapshot)
     for market in ("US", "JP"):

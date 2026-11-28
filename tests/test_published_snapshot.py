@@ -50,18 +50,22 @@ def test_published_nov20_snapshot_matches_the_computed_result():
 
 def test_published_latest_is_the_local_price_snapshot():
     latest = json.loads((DATA / "latest.json").read_text(encoding="utf-8"))
-    dated = json.loads((DATA / "snapshot-us-2026-11-25-jp-2026-11-26.json").read_text(encoding="utf-8"))
+    dated = json.loads((DATA / "snapshot-us-2026-11-25-jp-2026-11-27.json").read_text(encoding="utf-8"))
+    prior_local = json.loads((DATA / "snapshot-us-2026-11-25-jp-2026-11-26.json").read_text(encoding="utf-8"))
     notice = json.loads((DATA / "publication.json").read_text(encoding="utf-8"))
     prior = json.loads((DATA / "snapshot-2026-11-20.json").read_text(encoding="utf-8"))
     assert latest == dated
-    assert latest["snapshot_id"] == "b10aaf00a207ce76"
+    assert latest["snapshot_id"] == "6e766a9a66d32d24"
     assert latest["snapshot_id"] != prior["snapshot_id"]
-    assert latest["generated_at"] == "2026-11-27T00:00:00+00:00"
+    assert prior_local["snapshot_id"] == "b10aaf00a207ce76"
+    assert prior_local["markets"]["US"]["as_of"] == "2026-11-25"
+    assert prior_local["markets"]["JP"]["as_of"] == "2026-11-26"
+    assert latest["generated_at"] == "2026-11-28T00:00:00+00:00"
     assert latest["semantics_version"] == "2026-11-26.index.1.jp-yen"
     assert latest["mode"] == "real"
     assert latest["demo_disclaimer"] is None
     assert latest["markets"]["US"]["as_of"] == "2026-11-25"
-    assert latest["markets"]["JP"]["as_of"] == "2026-11-26"
+    assert latest["markets"]["JP"]["as_of"] == "2026-11-27"
     assert latest["markets"]["US"]["eligible_stocks"] == 1017
     assert latest["markets"]["JP"]["eligible_stocks"] == 496
     assert latest["config"]["cohort_thresholds"]["US"]["enabled"] is False
@@ -72,13 +76,17 @@ def test_published_latest_is_the_local_price_snapshot():
     assert symbols(latest, "turtle", "US") == []
     assert symbols(latest, "weak", "US") == ["ADI", "CDNS", "ECHO", "GTES", "IRM", "ON", "SNPS"]
     assert symbols(latest, "young", "US") == ["AMTM", "INSM", "ZS", "BMRN", "HPQ", "AWI", "GAP", "DLTR"]
-    assert symbols(latest, "adx", "JP") == ["2331"]
-    assert symbols(latest, "pullback", "JP") == ["9766", "4912", "9684", "9706"]
-    assert symbols(latest, "squeeze", "JP") == ["2371"]
-    assert symbols(latest, "turtle", "JP") == ["5844", "8015"]
-    assert symbols(latest, "weak", "JP") == ["4516"]
+    assert symbols(latest, "adx", "JP") == []
+    assert symbols(latest, "pullback", "JP") == ["6532", "2212", "3659", "9766", "4912", "2702", "9684", "9706", "4661"]
+    assert symbols(latest, "squeeze", "JP") == []
+    assert symbols(latest, "turtle", "JP") == []
+    assert symbols(latest, "weak", "JP") == []
     assert symbols(latest, "young", "JP") == []
     assert latest["scans"]["turtle"]["markets"]["US"]["counts"]["no_match"] == 1017
+    assert latest["scans"]["adx"]["markets"]["JP"]["counts"]["no_match"] == 496
+    assert latest["scans"]["squeeze"]["markets"]["JP"]["counts"]["no_match"] == 496
+    assert latest["scans"]["turtle"]["markets"]["JP"]["counts"]["no_match"] == 496
+    assert latest["scans"]["weak"]["markets"]["JP"]["counts"]["no_match"] == 496
     assert latest["scans"]["young"]["markets"]["JP"]["counts"]["no_match"] == 496
     held_out = {"SNDK", "CEG", "HOLX", "BMNR", "641A", "642A", "646A", "8303", "8377"}
     for scan in latest["scans"].values():
@@ -91,7 +99,7 @@ def test_published_latest_is_the_local_price_snapshot():
                 assert row["market_cap"] in (None, "")
                 assert not row.get("data_notice")
     assert notice["snapshot_id"] == latest["snapshot_id"]
-    assert notice["sessions"] == {"US": "2026-11-25", "JP": "2026-11-26"}
+    assert notice["sessions"] == {"US": "2026-11-25", "JP": "2026-11-27"}
     for market in ("US", "JP"):
         for scan_id in ("adx", "pullback", "squeeze", "turtle", "weak", "young"):
             assert notice["scans"][market][scan_id] == "valid"

@@ -48,10 +48,10 @@ def test_nov20_file_remains_beside_the_validated_local_snapshot():
     assert dated["snapshot_id"] == "333c3e1d581cb716"
     assert dated["semantics_version"] == "2026-11-22.provisional.2.jp-yen"
     assert dated["markets"]["US"]["as_of"] == dated["markets"]["JP"]["as_of"] == "2026-11-20"
-    assert latest["snapshot_id"] == "b10aaf00a207ce76"
+    assert latest["snapshot_id"] == "6e766a9a66d32d24"
     assert latest["semantics_version"] == "2026-11-26.index.1.jp-yen"
     assert latest["markets"]["US"]["as_of"] == "2026-11-25"
-    assert latest["markets"]["JP"]["as_of"] == "2026-11-26"
+    assert latest["markets"]["JP"]["as_of"] == "2026-11-27"
 
 
 def test_local_csv_maps_tickers_and_does_not_fill_holes(tmp_path: Path):
